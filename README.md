@@ -353,4 +353,4 @@ Please open an issue first for any significant feature or API change.
 
 ## License
 
-[MIT](LICENSE) © 2025 Chandu Chitikam
+[MIT](LICENSE) © 2026 Chandu Chitikam
