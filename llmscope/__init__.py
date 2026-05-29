@@ -10,7 +10,7 @@ Public API surface:
     ProbeResult     — structured result returned by a probe
 """
 
-from llmscope.scope import Scope
+from llmscope.scope import Scope, TraceResult
 from llmscope.features.feature import Feature, FeatureSet
 from llmscope.circuits.graph import AttributionGraph
 from llmscope.probes.base import BaseProbe
@@ -18,6 +18,7 @@ from llmscope.probes.runner import ProbeResult
 
 __all__ = [
     "Scope",
+    "TraceResult",
     "Feature",
     "FeatureSet",
     "AttributionGraph",
