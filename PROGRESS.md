@@ -1,19 +1,19 @@
 # LLmThoughtLens — Build Progress
 
-**Overall: 73.5%**  `███████████████░░░░░`
+**Overall: 86.7%**  `█████████████████░░░`
 
 | Phase | Range | Progress | Checks |
 |-------|-------|----------|--------|
 | 🔶 Ph0: Foundation and control plane | 0–10% | 5.5% `█████░░░░░` | 6/11 |
 | ✅ Ph1: Package skeleton and local developer workflow | 10–20% | 20.0% `██████████` | 16/16 |
-| 🔶 Ph2: Provider layer done for real | 20–35% | 33.8% `█████████░` | 12/13 |
+| ✅ Ph2: Provider layer done for real | 20–35% | 35.0% `██████████` | 13/13 |
 | ✅ Ph3: Minimal end-to-end tracing pipeline | 35–45% | 45.0% `██████████` | 12/12 |
-| 🔶 Ph4: Black-box interpretability engine | 45–55% | 53.3% `████████░░` | 5/6 |
-| 🔶 Ph5: White-box mechanistic core with SAE training | 55–70% | 68.3% `█████████░` | 8/9 |
-| 🔶 Ph6: Attribution graph quality and path analysis | 70–78% | 73.0% `████░░░░░░` | 3/8 |
-| 🔶 Ph7: Deep UI layer that actually shows model reasoning | 78–88% | 82.4% `████░░░░░░` | 4/9 |
-| 🔶 Ph8: Full probe suite mapped to the paper | 88–94% | 92.2% `███████░░░` | 9/13 |
-| 🔶 Ph9: Interventions, comparisons, and truth-testing | 94–97% | 95.7% `██████░░░░` | 4/7 |
+| ✅ Ph4: Black-box interpretability engine | 45–55% | 55.0% `██████████` | 6/6 |
+| ✅ Ph5: White-box mechanistic core with SAE training | 55–70% | 70.0% `██████████` | 9/9 |
+| 🔶 Ph6: Attribution graph quality and path analysis | 70–78% | 77.0% `█████████░` | 7/8 |
+| 🔶 Ph7: Deep UI layer that actually shows model reasoning | 78–88% | 85.8% `████████░░` | 7/9 |
+| ✅ Ph8: Full probe suite mapped to the paper | 88–94% | 94.0% `██████████` | 13/13 |
+| 🔶 Ph9: Interventions, comparisons, and truth-testing | 94–97% | 96.1% `███████░░░` | 5/7 |
 | 🔶 Ph10: Release engineering, docs, and production polish | 97–100% | 98.3% `████░░░░░░` | 4/9 |
 
 ## Phase 0 — Foundation and control plane (0% → 10%)
@@ -32,12 +32,12 @@
 
 ## Phase 1 — Package skeleton and local developer workflow (10% → 20%)
 
-- [✅] llmscope package directory exists
-- [✅] llmscope/providers/ exists
-- [✅] llmscope/features/ exists
-- [✅] llmscope/circuits/ exists
-- [✅] llmscope/probes/ exists
-- [✅] llmscope/visualization/ exists
+- [✅] LLmThoughtLens package directory exists
+- [✅] LLmThoughtLens/providers/ exists
+- [✅] LLmThoughtLens/features/ exists
+- [✅] LLmThoughtLens/circuits/ exists
+- [✅] LLmThoughtLens/probes/ exists
+- [✅] LLmThoughtLens/visualization/ exists
 - [✅] pyproject.toml defines [project] section
 - [✅] pyproject.toml defines build-system
 - [✅] Ruff configured (pyproject.toml or ruff.toml)
@@ -63,7 +63,7 @@
 - [✅] OllamaProvider class defined
 - [✅] ProviderOutput contains 'tokens' field
 - [✅] ProviderOutput contains 'logits' field
-- [❌] Provider caching/retry logic present
+- [✅] Provider caching/retry logic present
 
 ## Phase 3 — Minimal end-to-end tracing pipeline (35% → 45%)
 
@@ -87,13 +87,13 @@
 - [✅] API cost estimator present
 - [✅] Uncertainty/confidence scoring present
 - [✅] Caching layer for perturbations present
-- [❌] Black-box result labels in report (observed/inferred/approximated)
+- [✅] Black-box result labels in report (observed/inferred/approximated)
 
 ## Phase 5 — White-box mechanistic core with SAE training (55% → 70%)
 
 - [✅] SAE file non-empty
 - [✅] TopKSAE or SparseAutoencoder class defined
-- [❌] SAE training loop present
+- [✅] SAE training loop present
 - [✅] Activation cache pipeline present
 - [✅] SAE metrics: reconstruction error tracked
 - [✅] SAE metrics: L0 sparsity tracked
@@ -105,11 +105,11 @@
 
 - [✅] Graph pruning logic present
 - [✅] Top-k path ranking present
-- [❌] Suppressor/inhibitor edge support present
-- [❌] Error residual node present
-- [❌] Graph diff/comparison support present
+- [✅] Suppressor/inhibitor edge support present
+- [✅] Error residual node present
+- [✅] Graph diff/comparison support present
 - [✅] Graph export to JSON present
-- [❌] Graph export to CSV present
+- [✅] Graph export to CSV present
 - [❌] Indirect edge support present
 
 ## Phase 7 — Deep UI layer that actually shows model reasoning (78% → 88%)
@@ -117,9 +117,9 @@
 - [✅] visualization/ directory non-empty
 - [✅] Token heatmap present
 - [✅] Attribution graph explorer (Plotly/D3) present
-- [❌] Residual stream trajectory view present
-- [❌] Feature browser present
-- [❌] Probe dashboard present
+- [✅] Residual stream trajectory view present
+- [✅] Feature browser present
+- [✅] Probe dashboard present
 - [✅] Standalone HTML report with tabs
 - [❌] Dark mode support present
 - [❌] Observation type labels in UI (observed/inferred/approximated)
@@ -128,13 +128,13 @@
 
 - [✅] MultiHopProbe implemented
 - [✅] CapitalsProbe implemented
-- [❌] RhymePlanningProbe implemented
-- [❌] PersonaConsistencyProbe implemented
-- [❌] MultilingualProbe implemented
+- [✅] RhymePlanningProbe implemented
+- [✅] PersonaConsistencyProbe implemented
+- [✅] MultilingualProbe implemented
 - [✅] HallucinationProbe implemented
 - [✅] CoTFaithfulnessProbe implemented
 - [✅] RefusalProbe implemented
-- [❌] SuppressorProbe implemented
+- [✅] SuppressorProbe implemented
 - [✅] MotivatedReasoningProbe implemented
 - [✅] ProbeRunner / benchmark runner present
 - [✅] Probes output pass/fail score
@@ -148,7 +148,7 @@
 - [✅] Feature clamp support
 - [❌] Before/after trace comparison logic
 - [❌] Intervention report mode present
-- [❌] Causal validation examples/tests present
+- [✅] Causal validation examples/tests present
 
 ## Phase 10 — Release engineering, docs, and production polish (97% → 100%)
 
