@@ -113,6 +113,29 @@ class MockProvider(BaseProvider):
         return f"mock-L{self.n_layers}-H{self.n_heads}-D{self.d_model}"
 
     def run(self, prompt: str, **_: Any) -> ProviderOutput:
+        return self._build_output(prompt, interventions=None)
+
+    def run_with_intervention(
+        self,
+        prompt: str,
+        interventions: list[Any] | None = None,
+        **_: Any,
+    ) -> ProviderOutput:
+        """Run *prompt* and apply each intervention to the generated activations.
+
+        This is the offline analogue of the HuggingFace provider's real
+        forward-pre hooks: every intervention's :meth:`apply_numpy` is run
+        against the synthesised ``(L, T, D)`` activation tensor before any
+        downstream feature / graph computation sees it.  Deterministic
+        causal tests rely on this behaviour.
+        """
+        return self._build_output(prompt, interventions=interventions or None)
+
+    def _build_output(
+        self,
+        prompt: str,
+        interventions: list[Any] | None,
+    ) -> ProviderOutput:
         rng = self._rng_for(prompt)
         tokens = whitespace_tokens(prompt)
         n_tokens = len(tokens)
@@ -120,6 +143,9 @@ class MockProvider(BaseProvider):
         token_ids = [abs(hash(t)) % self.vocab_size for t in tokens]
 
         activations = self._activations(rng, n_tokens)
+        if interventions:
+            for spec in interventions:
+                activations = spec.apply_numpy(activations)
         attentions = self._attentions(rng, n_tokens)
         all_logits = self._logits(rng, n_tokens)
 

@@ -164,14 +164,12 @@ class HuggingFaceProvider(BaseProvider):
         tokens: list[str] = [self._tokenizer.decode([tid]) for tid in token_ids]
 
         blocks = _resolve_transformer_blocks(self._model)
-        handles: list[Any] = []
-        if intervention_hooks:
-            for spec in intervention_hooks:
-                handle = _register_intervention_hook(blocks, spec)
-                if handle is not None:
-                    handles.append(handle)
 
-        try:
+        # Use the shared context manager so hook installation/removal goes
+        # through a single, well-tested code path (and is exception-safe).
+        from LLmThoughtLens.features.intervention import intervention_context
+
+        with intervention_context(blocks, intervention_hooks or []) as ictx:
             with torch.no_grad():
                 outputs = self._model(
                     **inputs,
@@ -180,9 +178,7 @@ class HuggingFaceProvider(BaseProvider):
                     use_cache=False,
                     **kwargs,
                 )
-        finally:
-            for h in handles:
-                h.remove()
+            n_intervention_hooks = ictx.n_installed
 
         activations: np.ndarray | None = None
         attentions: np.ndarray | None = None
@@ -206,7 +202,7 @@ class HuggingFaceProvider(BaseProvider):
             "provider": "HuggingFaceProvider",
             "model": self.model_name,
             "device": str(self._device),
-            "n_intervention_hooks": len(handles),
+            "n_intervention_hooks": int(n_intervention_hooks),
             "evidence_note": (
                 "Hidden states and attentions captured via "
                 "output_hidden_states / output_attentions on the underlying "
@@ -268,19 +264,11 @@ def _resolve_transformer_blocks(model: Any) -> list[Any]:
 
 
 def _register_intervention_hook(blocks: list[Any], spec: Any) -> Any:
-    """Register one forward-pre-hook on the target block; return its handle."""
-    if not blocks:
-        return None
-    target = int(getattr(spec, "layer", 0)) % len(blocks)
-    block = blocks[target]
+    """Compatibility shim — delegates to :func:`intervention._install_mlp_hook`.
 
-    def _pre_hook(_module: Any, inputs: Any) -> Any:
-        if not inputs:
-            return inputs
-        first = inputs[0]
-        if first is None:
-            return inputs
-        modified = spec.apply_torch(first)
-        return (modified,) + tuple(inputs[1:])
+    Kept so any external caller that imported this name continues to work;
+    new code should use :class:`intervention.intervention_context` instead.
+    """
+    from LLmThoughtLens.features.intervention import _install_mlp_hook
 
-    return block.register_forward_pre_hook(_pre_hook)
+    return _install_mlp_hook(blocks, spec)

@@ -154,6 +154,10 @@ class ReportBuilder:
     def add_section(self, title: str, content: str, **meta: Any) -> ReportBuilder:
         return self.add_tab(title.lower().replace(" ", "_"), title, content, **meta)
 
+    def add_graph_diff(self, diff: Any, title: str = "Graph Diff") -> ReportBuilder:
+        """Embed a :class:`GraphDiff` rendering as a new tab in the report."""
+        return self.add_tab("diff", title, diff.to_html(), diff_summary=diff.summary())
+
     def render(self) -> str:
         if not self._tabs:
             self.add_tab("empty", "Report", "<p>No content.</p>")
