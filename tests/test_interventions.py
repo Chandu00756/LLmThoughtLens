@@ -18,11 +18,9 @@ a specific node id) so the failure mode is unambiguous.
 from __future__ import annotations
 
 import pytest
-
 from LLmThoughtLens.features.intervention import FeatureIntervention, intervention_context
 from LLmThoughtLens.providers.mock_provider import MockProvider
 from LLmThoughtLens.scope import Scope
-
 
 _PROMPT = "the capital of France is Paris and the population is large"
 
@@ -53,30 +51,44 @@ def _edges_into_output_weight(result) -> float:
 # ---------------------------------------------------------------------------
 
 
+def _pick_strongest_token(result) -> tuple[int, float]:
+    """Token whose aggregate baseline contribution is largest — gives the
+    sharpest causal signal because the FeatureExtractor's top-k filter does
+    not guarantee every input token is represented."""
+    contrib: dict[int, float] = {}
+    for f in result.features:
+        contrib[f.token_idx] = contrib.get(f.token_idx, 0.0) + f.score
+    if not contrib:
+        return 0, 0.0
+    tok, val = max(contrib.items(), key=lambda kv: kv[1])
+    return tok, float(val)
+
+
 def test_inhibit_reduces_feature_contribution_in_output_graph() -> None:
     """Inhibiting an entire token's contribution must lower its aggregated
     feature score in the output trace."""
 
     scope = _build_scope()
     baseline = scope.trace_full(_PROMPT, run_probes=False)
-    target_token = 0  # "the"
-    baseline_contribution = _feature_score_at_token(baseline, target_token)
-    assert baseline_contribution > 0.0, "fixture must have nonzero baseline at token 0"
+    target_token, baseline_contribution = _pick_strongest_token(baseline)
+    assert baseline_contribution > 0.0, "baseline must have nonzero contribution somewhere"
 
     # Inhibit every hidden dimension at that token across every layer.
-    # `feature_id=0` with no SAE attached selects coord 0; targeting all
-    # layers (layer=-1) and the chosen token isolates the effect.
-    intervention = FeatureIntervention.inhibit(
-        feature_id=0, scale=1.0, layer=-1, token_idx=target_token
-    )
-    modified = scope.trace_full(_PROMPT, interventions=[intervention], run_probes=False)
+    # Without an SAE attached, applying one intervention per dimension is
+    # the unambiguous way to zero the activation column for the target
+    # token; collectively they cancel the entire residual stream there.
+    interventions = [
+        FeatureIntervention.inhibit(feature_id=d, scale=1.0, layer=-1, token_idx=target_token)
+        for d in range(scope.provider.d_model)
+    ]
+    modified = scope.trace_full(_PROMPT, interventions=interventions, run_probes=False)
     modified_contribution = _feature_score_at_token(modified, target_token)
 
-    # Inhibition zeroes the projection along the chosen direction, so the
-    # L2 norm of every (layer, token=0) vector can only stay the same or
-    # decrease.  A strict inequality is the load-bearing assertion.
+    # Inhibition zeroes the projection along every dimension at the target
+    # token, so the L2 norm of every (layer, target_token) vector collapses
+    # and downstream feature scores at that token must strictly drop.
     assert modified_contribution < baseline_contribution, (
-        f"inhibit failed to reduce contribution: "
+        f"inhibit failed to reduce contribution at token {target_token}: "
         f"baseline={baseline_contribution:.4f}, modified={modified_contribution:.4f}"
     )
 
@@ -97,9 +109,7 @@ def test_amplify_increases_edge_weight_to_output_node() -> None:
     assert baseline_w > 0.0
 
     # Amplify with a large scale so the effect on |a_dst| dominates noise.
-    intervention = FeatureIntervention.amplify(
-        feature_id=0, scale=8.0, layer=-1, token_idx=-1
-    )
+    intervention = FeatureIntervention.amplify(feature_id=0, scale=8.0, layer=-1, token_idx=-1)
     modified = scope.trace_full(_PROMPT, interventions=[intervention], run_probes=False)
     modified_w = _edges_into_output_weight(modified)
 
@@ -129,17 +139,11 @@ def test_clamp_to_zero_removes_feature_node_from_pruned_graph() -> None:
     # the one whose disappearance gives the strongest causal signal.
     contribution_per_token: dict[int, float] = {}
     for f in baseline.features:
-        contribution_per_token[f.token_idx] = (
-            contribution_per_token.get(f.token_idx, 0.0) + f.score
-        )
-    target_token, baseline_contribution = max(
-        contribution_per_token.items(), key=lambda kv: kv[1]
-    )
+        contribution_per_token[f.token_idx] = contribution_per_token.get(f.token_idx, 0.0) + f.score
+    target_token, baseline_contribution = max(contribution_per_token.items(), key=lambda kv: kv[1])
     assert baseline_contribution > 0.0
 
-    baseline_ids_for_target = {
-        f.id for f in baseline.features if f.token_idx == target_token
-    }
+    baseline_ids_for_target = {f.id for f in baseline.features if f.token_idx == target_token}
     assert baseline_ids_for_target, "baseline must have at least one feature at target"
 
     # Strong threshold so weak surviving edges don't keep the node alive.
@@ -163,9 +167,7 @@ def test_clamp_to_zero_removes_feature_node_from_pruned_graph() -> None:
     # single intervention along a learned direction would suffice; here we
     # iterate to make the causal effect unambiguous on the raw hidden axes.
     interventions = [
-        FeatureIntervention.clamp(
-            feature_id=d, value=0.0, layer=-1, token_idx=target_token
-        )
+        FeatureIntervention.clamp(feature_id=d, value=0.0, layer=-1, token_idx=target_token)
         for d in range(provider.d_model)
     ]
     modified = scope.trace_full(
@@ -174,9 +176,7 @@ def test_clamp_to_zero_removes_feature_node_from_pruned_graph() -> None:
         attribution_threshold=0.0,
         run_probes=False,
     )
-    modified_ids_for_target = {
-        f.id for f in modified.features if f.token_idx == target_token
-    }
+    modified_ids_for_target = {f.id for f in modified.features if f.token_idx == target_token}
     pruned_modified = modified.graph.prune(threshold, keep_isolated=False)
 
     # Strongest possible causal signal: extraction itself drops the feature.
@@ -216,10 +216,9 @@ def test_intervention_context_removes_hooks_on_exception() -> None:
     blocks = [_Block(), _Block()]
     spec = FeatureIntervention.clamp(feature_id=0, value=0.0, layer=1)
 
-    with pytest.raises(RuntimeError):
-        with intervention_context(blocks, [spec]):
-            assert len(blocks[1].mlp._forward_pre_hooks) == 1
-            raise RuntimeError("simulated forward-pass failure")
+    with pytest.raises(RuntimeError), intervention_context(blocks, [spec]):
+        assert len(blocks[1].mlp._forward_pre_hooks) == 1
+        raise RuntimeError("simulated forward-pass failure")
 
     # After context exit (even via exception), no hooks remain.
     assert not blocks[0].mlp._forward_pre_hooks

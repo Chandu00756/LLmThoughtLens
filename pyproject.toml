@@ -71,6 +71,9 @@ dev = [
   "black>=24.0",
   "mypy>=1.9",
   "pre-commit>=3.7",
+  "build>=1.2",
+  "twine>=5.0",
+  "pip-audit>=2.7",
 ]
 
 [project.scripts]

@@ -1,6 +1,6 @@
 # LLmThoughtLens — Build Progress
 
-**Overall: 86.7%**  `█████████████████░░░`
+**Overall: 89.4%**  `██████████████████░░`
 
 | Phase | Range | Progress | Checks |
 |-------|-------|----------|--------|
@@ -14,7 +14,7 @@
 | 🔶 Ph7: Deep UI layer that actually shows model reasoning | 78–88% | 85.8% `████████░░` | 7/9 |
 | ✅ Ph8: Full probe suite mapped to the paper | 88–94% | 94.0% `██████████` | 13/13 |
 | 🔶 Ph9: Interventions, comparisons, and truth-testing | 94–97% | 96.1% `███████░░░` | 5/7 |
-| 🔶 Ph10: Release engineering, docs, and production polish | 97–100% | 98.3% `████░░░░░░` | 4/9 |
+| 🔶 Ph10: Release engineering, docs, and production polish | 97–100% | 99.3% `████████░░` | 7/9 |
 
 ## Phase 0 — Foundation and control plane (0% → 10%)
 
@@ -154,9 +154,9 @@
 
 - [✅] pyproject.toml has classifiers
 - [✅] pyproject.toml has version
-- [❌] CHANGELOG.md present
-- [❌] docs/ directory has content
-- [❌] docs/ quickstart guide present
+- [✅] CHANGELOG.md present
+- [✅] docs/ directory has content
+- [✅] docs/ quickstart guide present
 - [✅] examples/ directory has content
 - [❌] pip-audit or safety in CI
 - [✅] Trusted Publishing / PyPI token config present

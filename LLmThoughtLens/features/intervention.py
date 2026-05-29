@@ -223,12 +223,12 @@ class intervention_context:  # noqa: N801 — lowercase to read like a contextma
     target the Anthropic CLT paper uses.
     """
 
-    def __init__(self, blocks: list[Any], interventions: list["FeatureIntervention"]):
+    def __init__(self, blocks: list[Any], interventions: list[FeatureIntervention]):
         self.blocks = blocks
         self.interventions = interventions
         self._handles: list[Any] = []
 
-    def __enter__(self) -> "intervention_context":
+    def __enter__(self) -> intervention_context:
         for spec in self.interventions:
             h = _install_mlp_hook(self.blocks, spec)
             if h is not None:
@@ -248,7 +248,7 @@ class intervention_context:  # noqa: N801 — lowercase to read like a contextma
         return len(self._handles)
 
 
-def _install_mlp_hook(blocks: list[Any], spec: "FeatureIntervention") -> Any | None:
+def _install_mlp_hook(blocks: list[Any], spec: FeatureIntervention) -> Any | None:
     """Register a forward-pre hook on the MLP submodule of ``blocks[spec.layer]``.
 
     Returns the handle (so the caller can ``.remove()`` it).  ``None`` if

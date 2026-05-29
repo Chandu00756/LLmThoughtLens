@@ -1,3 +1,4 @@
+# ruff: noqa: UP031  (CSS templates use %-formatting because { } collide with format-string braces)
 """GraphDiff — compare two attribution graphs (baseline vs intervention).
 
 Produces three concrete result buckets per the design document:
@@ -149,11 +150,11 @@ class GraphDiff:
             f"{css}"
             f'<div class="tl-diff">'
             f'<div class="col added"><h4>Added ({len(self.added_nodes)} nodes, '
-            f'{len(self.added_edges)} edges)</h4>{added_rows or self._empty()}</div>'
+            f"{len(self.added_edges)} edges)</h4>{added_rows or self._empty()}</div>"
             f'<div class="col removed"><h4>Removed ({len(self.removed_nodes)} nodes, '
-            f'{len(self.removed_edges)} edges)</h4>{removed_rows or self._empty()}</div>'
+            f"{len(self.removed_edges)} edges)</h4>{removed_rows or self._empty()}</div>"
             f'<div class="col changed"><h4>Changed ({len(self.changed_edges)} edges'
-            f', |Δ|&gt;{self.threshold:g})</h4>{changed_rows or self._empty()}</div>'
+            f", |Δ|&gt;{self.threshold:g})</h4>{changed_rows or self._empty()}</div>"
             f"</div>"
         )
 
@@ -174,8 +175,7 @@ class GraphDiff:
             return ""
         rows = "".join(f"<tr><td>{s}</td><td>{d}</td></tr>" for s, d in edges)
         return (
-            "<table><thead><tr><th>src</th><th>dst</th></tr></thead>"
-            f"<tbody>{rows}</tbody></table>"
+            f"<table><thead><tr><th>src</th><th>dst</th></tr></thead><tbody>{rows}</tbody></table>"
         )
 
     @staticmethod

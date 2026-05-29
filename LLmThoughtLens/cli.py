@@ -280,6 +280,63 @@ def cmd_version(_argv: list[str]) -> int:
     return 0
 
 
+def cmd_benchmark(argv: list[str]) -> int:
+    """Run the full 10-probe battery, dump JSON, print a Rich scorecard."""
+    import argparse
+
+    p = argparse.ArgumentParser(
+        prog="LLmThoughtLens benchmark",
+        description=(
+            "Run the 10 built-in interpretability probes against a provider, "
+            "write a JSON scorecard, and print a formatted summary."
+        ),
+    )
+    p.add_argument(
+        "--provider",
+        default="mock",
+        choices=["mock", "openai", "anthropic", "huggingface", "ollama"],
+    )
+    p.add_argument("--model", default="")
+    p.add_argument("--api-key", default=None)
+    p.add_argument("--base-url", default=None)
+    p.add_argument(
+        "--output",
+        default="benchmark_results.json",
+        help="path to write the JSON scorecard (default: benchmark_results.json)",
+    )
+    args = p.parse_args(argv)
+
+    from LLmThoughtLens.probes.builtin import all_probes
+    from LLmThoughtLens.probes.runner import ProbeRunner
+
+    provider = _make_provider(args.provider, args.model, args.api_key, args.base_url)
+    _console.print(f"[b]LLmThoughtLens benchmark[/b]  provider=[b]{provider.model_id}[/b]")
+    report = ProbeRunner(all_probes()).run_all(provider)
+
+    tbl = Table(title=f"Interpretability scorecard — {provider.model_id}")
+    tbl.add_column("Probe")
+    tbl.add_column("Pass?", justify="center")
+    tbl.add_column("Score", justify="right")
+    tbl.add_column("Summary")
+    for r in report.results:
+        tbl.add_row(
+            r.probe_name,
+            "[green]PASS[/green]" if r.passed else "[red]FAIL[/red]",
+            f"{r.score:.2f}",
+            (r.summary or "")[:80],
+        )
+    _console.print(tbl)
+    _console.print(
+        f"[b]overall[/b]  {report.n_passed} / {report.n_total} passed "
+        f"(mean {report.mean_score:.2f})"
+    )
+
+    out_text = report.to_json() or ""
+    Path(args.output).write_text(out_text)
+    _console.print(f"wrote {Path(args.output).resolve()}")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # Dispatch
 # ---------------------------------------------------------------------------
@@ -289,6 +346,7 @@ _COMMANDS = {
     "tui": cmd_tui,
     "trace": cmd_trace,
     "probe": cmd_probe,
+    "benchmark": cmd_benchmark,
     "cache-activations": cmd_cache_activations,
     "train-sae": cmd_train_sae,
     "label-features": cmd_label_features,
