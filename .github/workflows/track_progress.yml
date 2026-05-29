@@ -1,0 +1,147 @@
+name: Build Progress Tracker
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+  schedule:
+    # Runs daily at 08:00 UTC so PROGRESS.md stays fresh
+    - cron: "0 8 * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  track:
+    name: Compute & publish progress
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run progress tracker (JSON)
+        id: tracker
+        run: |
+          python3 scripts/track_progress.py --json > progress_report.json
+          OVERALL=$(python3 -c "import json; d=json.load(open('progress_report.json')); print(f\"{d['overall_pct']:.1f}\")")
+          echo "overall=$OVERALL" >> "$GITHUB_OUTPUT"
+          cat progress_report.json
+
+      - name: Update PROGRESS.md
+        run: python3 scripts/track_progress.py --update
+
+      - name: Upload progress report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: progress-report
+          path: |
+            PROGRESS.md
+            progress_report.json
+          retention-days: 90
+
+      - name: Commit updated PROGRESS.md (main branch only)
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add PROGRESS.md
+          if git diff --cached --quiet; then
+            echo "No changes to PROGRESS.md"
+          else
+            git commit -m "chore: update PROGRESS.md — ${{ steps.tracker.outputs.overall }}% complete [skip ci]"
+            git push
+          fi
+
+      - name: Add progress summary to job summary
+        run: |
+          OVERALL="${{ steps.tracker.outputs.overall }}"
+          echo "## 📊 Build Progress: ${OVERALL}%" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          python3 - <<'EOF'
+          import json, math
+
+          with open("progress_report.json") as f:
+              data = json.load(f)
+
+          BAR_FULL = "█"
+          BAR_EMPTY = "░"
+          WIDTH = 20
+
+          def bar(pct):
+              filled = round(pct / 100 * WIDTH)
+              return BAR_FULL * filled + BAR_EMPTY * (WIDTH - filled)
+
+          overall = data["overall_pct"]
+          print(f"**Overall: {overall:.1f}%** `{bar(overall)}`\n")
+          print("| Phase | Range | Score | Checks |")
+          print("|-------|-------|-------|--------|")
+          for p in data["phases"]:
+              icon = "✅" if p["passed"] == p["total"] else ("🔶" if p["passed"] > 0 else "❌")
+              print(
+                  f"| {icon} **Ph{p['number']}**: {p['name']}"
+                  f" | {p['pct_start']}–{p['pct_end']}%"
+                  f" | {p['completion_pct']:.1f}% `{bar(p['completion_pct'])}`"
+                  f" | {p['passed']}/{p['total']} |"
+              )
+          EOF
+          >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment on PR with progress (PR only)
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const overall = '${{ steps.tracker.outputs.overall }}';
+            const report = JSON.parse(fs.readFileSync('progress_report.json', 'utf8'));
+
+            const bar = (pct, w=20) => {
+              const filled = Math.round(pct / 100 * w);
+              return '█'.repeat(filled) + '░'.repeat(w - filled);
+            };
+
+            let body = `## 📊 LLmThoughtLens Build Progress: **${overall}%** \`${bar(overall)}\`\n\n`;
+            body += '| Phase | Range | Score | ✅ / Total |\n';
+            body += '|-------|-------|-------|------------|\n';
+            for (const p of report.phases) {
+              const icon = p.passed === p.total ? '✅' : (p.passed > 0 ? '🔶' : '❌');
+              body += `| ${icon} Ph${p.number}: ${p.name} | ${p.pct_start}–${p.pct_end}% | ${p.completion_pct.toFixed(1)}% | ${p.passed}/${p.total} |\n`;
+            }
+            body += '\n_Updated automatically by the Build Progress Tracker workflow._';
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c =>
+              c.user.login === 'github-actions[bot]' &&
+              c.body.includes('LLmThoughtLens Build Progress')
+            );
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }

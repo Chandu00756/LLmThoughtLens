@@ -1,0 +1,112 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llmscope"
+version = "0.1.0"
+description = "Platform-agnostic LLM interpretability — trace circuits and attribution graphs for any model"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Chandu Ch", email = "chanduchitikam@gmail.com" }]
+keywords = [
+  "llm", "interpretability", "mechanistic", "attribution-graph",
+  "circuits", "sae", "sparse-autoencoder", "xai", "anthropic",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "plotly>=5.18",
+]
+
+[project.optional-dependencies]
+openai     = ["openai>=1.0"]
+anthropic  = ["anthropic>=0.20"]
+huggingface = ["torch>=2.0", "transformers>=4.38", "accelerate>=0.27"]
+ollama     = ["httpx>=0.26"]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=4.1",
+  "ruff>=0.4",
+  "black>=24.0",
+  "mypy>=1.9",
+  "pre-commit>=3.7",
+]
+
+[project.scripts]
+llmscope = "llmscope.cli:main"
+
+[project.urls]
+Homepage   = "https://github.com/Chandu00756/LLmThoughtLens"
+Repository = "https://github.com/Chandu00756/LLmThoughtLens"
+Issues     = "https://github.com/Chandu00756/LLmThoughtLens/issues"
+
+# ---------------------------------------------------------------------------
+# Hatch
+# ---------------------------------------------------------------------------
+[tool.hatch.build.targets.wheel]
+packages = ["llmscope"]
+
+# ---------------------------------------------------------------------------
+# Ruff
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["llmscope", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+# ---------------------------------------------------------------------------
+# Black
+# ---------------------------------------------------------------------------
+[tool.black]
+line-length = 100
+target-version = ["py310", "py311", "py312"]
+
+# ---------------------------------------------------------------------------
+# Pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+markers = [
+  "integration: requires live API keys",
+  "local: requires local service (Ollama)",
+  "gpu: requires CUDA GPU",
+]
+
+# ---------------------------------------------------------------------------
+# Coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["llmscope"]
+omit = ["tests/*", "scripts/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+
+# ---------------------------------------------------------------------------
+# Mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+strict = false
+ignore_missing_imports = true
+warn_unused_ignores = true
