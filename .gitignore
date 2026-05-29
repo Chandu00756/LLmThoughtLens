@@ -1,0 +1,53 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+.eggs/
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.cache
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*.orig
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# Notebooks
+*.ipynb_checkpoints/
+
+# Secrets / env files
+.env
+.env.*
+!.env.example
