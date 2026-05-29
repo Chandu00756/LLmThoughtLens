@@ -1,4 +1,4 @@
-"""Quickstart example — demonstrates llmscope with the built-in MockProvider.
+"""Quickstart example — demonstrates LLmThoughtLens with the built-in MockProvider.
 
 Run with:
     python examples/quickstart.py
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from llmscope import Scope, Feature, FeatureSet, AttributionGraph
-from llmscope.providers.registry import list_providers
+from LLmThoughtLens import Scope, Feature, FeatureSet, AttributionGraph
+from LLmThoughtLens.providers.registry import list_providers
 
 # ------------------------------------------------------------------
 # 1. Create a scope backed by the deterministic MockProvider

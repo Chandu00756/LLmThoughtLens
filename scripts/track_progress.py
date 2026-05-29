@@ -1,5 +1,5 @@
 """
-LLmThoughtLens / llmscope — Automated Progress Tracker
+LLmThoughtLens / LLmThoughtLens — Automated Progress Tracker
 Inspects the repository and produces a phase-by-phase completion score.
 
 Usage:
@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PKG = ROOT / "llmscope"
+PKG = ROOT / "LLmThoughtLens"
 TESTS = ROOT / "tests"
 GITHUB = ROOT / ".github"
 
@@ -227,12 +227,12 @@ def check_phase_1() -> Phase:
     phase = Phase(1, "Package skeleton and local developer workflow", 10, 20)
 
     phase.checks.append(Check(
-        "llmscope package directory exists",
+        "LLmThoughtLens package directory exists",
         dir_exists(PKG),
     ))
     for subpkg in ["providers", "features", "circuits", "probes", "visualization"]:
         phase.checks.append(Check(
-            f"llmscope/{subpkg}/ exists",
+            f"LLmThoughtLens/{subpkg}/ exists",
             dir_exists(PKG / subpkg),
         ))
 

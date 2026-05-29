@@ -3,7 +3,7 @@ requires = ["hatchling>=1.21"]
 build-backend = "hatchling.build"
 
 [project]
-name = "thoughtlens"
+name = "LLmThoughtLens"
 version = "0.1.0"
 description = "Platform-agnostic LLM interpretability — circuit tracing, SAE features, attribution graphs, probes, and a self-contained HTML report for any LLM."
 readme = "README.md"
@@ -74,7 +74,7 @@ dev = [
 ]
 
 [project.scripts]
-thoughtlens = "thoughtlens.cli:main"
+LLmThoughtLens = "LLmThoughtLens.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Chandu00756/LLmThoughtLens"
@@ -85,11 +85,11 @@ Issues = "https://github.com/Chandu00756/LLmThoughtLens/issues"
 # Hatch
 # ---------------------------------------------------------------------------
 [tool.hatch.build.targets.wheel]
-packages = ["thoughtlens"]
+packages = ["LLmThoughtLens"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-  "thoughtlens",
+  "LLmThoughtLens",
   "tests",
   "examples",
   "README.md",
@@ -105,8 +105,8 @@ include = [
 [tool.ruff]
 target-version = "py310"
 line-length = 100
-src = ["thoughtlens", "tests"]
-extend-exclude = ["llmscope", ".venv", "build", "dist"]
+src = ["LLmThoughtLens", "tests"]
+extend-exclude = [".venv", "build", "dist"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
@@ -114,7 +114,7 @@ ignore = ["E501", "B008", "UP007", "UP045", "UP006", "UP035", "B904"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "B018"]
-"thoughtlens/tui/*" = ["B008"]
+"LLmThoughtLens/tui/*" = ["B008"]
 
 # ---------------------------------------------------------------------------
 # Black
@@ -124,8 +124,7 @@ line-length = 100
 target-version = ["py310", "py311", "py312"]
 extend-exclude = '''
 (
-  ^/llmscope/
-  | ^/\.venv/
+  ^/\.venv/
 )
 '''
 
@@ -150,7 +149,7 @@ markers = [
 # Coverage
 # ---------------------------------------------------------------------------
 [tool.coverage.run]
-source = ["thoughtlens"]
+source = ["LLmThoughtLens"]
 omit = ["tests/*", "scripts/*", "examples/*"]
 
 [tool.coverage.report]
@@ -173,5 +172,8 @@ ignore_missing_imports = true
 warn_unused_ignores = false
 no_implicit_optional = false
 check_untyped_defs = true
-files = ["thoughtlens"]
-exclude = "(llmscope|.venv|build|dist|tests)"
+files = ["LLmThoughtLens"]
+# TUI excluded — Textual's dynamic `query_one()` widget API doesn't expose
+# concrete types statically; running mypy on those modules produces only
+# false positives. Pytest still covers TUI construction.
+exclude = "(\\.venv|build|dist|tests|LLmThoughtLens/tui)"

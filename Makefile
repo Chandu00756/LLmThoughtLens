@@ -2,6 +2,7 @@
 
 PYTHON ?= python3
 VENV   ?= .venv
+PKG    ?= LLmThoughtLens
 
 ## Create venv and install package + dev extras (editable)
 install:
@@ -14,17 +15,17 @@ dev: install
 
 ## Run ruff + ruff-format check
 lint:
-	@$(VENV)/bin/ruff check thoughtlens tests
-	@$(VENV)/bin/ruff format --check thoughtlens tests
+	@$(VENV)/bin/ruff check $(PKG) tests
+	@$(VENV)/bin/ruff format --check $(PKG) tests
 
 ## Auto-format the codebase
 fmt:
-	@$(VENV)/bin/ruff format thoughtlens tests
-	@$(VENV)/bin/ruff check --fix thoughtlens tests
+	@$(VENV)/bin/ruff format $(PKG) tests
+	@$(VENV)/bin/ruff check --fix $(PKG) tests
 
 ## Run mypy
 typecheck:
-	@$(VENV)/bin/mypy thoughtlens
+	@$(VENV)/bin/mypy $(PKG)
 
 ## Run the full pytest suite
 test:
@@ -32,7 +33,7 @@ test:
 
 ## Quick mock-only smoke check
 smoke:
-	@$(VENV)/bin/python -c "from thoughtlens import Scope; r = Scope.from_mock().trace_full('Hello world'); print('smoke ok:', r.output_token, len(r.features), 'features')"
+	@$(VENV)/bin/python -c "from $(PKG) import Scope; r = Scope.from_mock().trace_full('Hello world'); print('smoke ok:', r.output_token, len(r.features), 'features')"
 
 ## Remove caches and venv
 clean:

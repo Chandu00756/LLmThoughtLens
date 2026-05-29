@@ -12,13 +12,13 @@
 
 **Please do NOT open a public GitHub Issue for security vulnerabilities.**
 
-If you believe you have discovered a security issue in llmscope, please
+If you believe you have discovered a security issue in LLmThoughtLens, please
 report it privately so we can address it before public disclosure.
 
 ### How to Report
 
 1. **Email**: Send details to **chanduchitikam@gmail.com** with subject line:
-   `[SECURITY] llmscope — <brief description>`
+   `[SECURITY] LLmThoughtLens — <brief description>`
 2. **GitHub Private Advisory**: Open a
    [Security Advisory](https://github.com/Chandu00756/LLmThoughtLens/security/advisories/new)
    via the repository's Security tab.
@@ -49,7 +49,7 @@ report it privately so we can address it before public disclosure.
 
 - Arbitrary code execution via crafted model inputs or provider responses.
 - Credential or API key leakage through logs or serialised outputs.
-- Dependency vulnerabilities introduced by llmscope's dependency tree.
+- Dependency vulnerabilities introduced by LLmThoughtLens's dependency tree.
 - Path traversal or file read/write via report or graph export features.
 
 ### Out of Scope
@@ -66,7 +66,7 @@ report it privately so we can address it before public disclosure.
 
 - **Never commit API keys** — use environment variables or a secrets manager.
 - **Pin dependencies** in production — use `pip-audit` or `safety` to scan.
-- **Review outputs** — llmscope surfaces raw model activations; treat them
+- **Review outputs** — LLmThoughtLens surfaces raw model activations; treat them
   as untrusted data from an external service.
 - **Restrict file system access** — report export paths should be validated
   at the application layer.

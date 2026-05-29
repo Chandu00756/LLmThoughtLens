@@ -1,4 +1,4 @@
-# Contributing to llmscope
+# Contributing to LLmThoughtLens
 
 Thank you for your interest in contributing! This document describes how to
 get started, the kinds of contributions we welcome, and the process for
@@ -95,7 +95,7 @@ Types: `feat`, `fix`, `docs`, `chore`, `test`, `refactor`, `perf`, `ci`.
 
 1. Branch off `develop` (or `main` for doc-only changes).
 2. Make your changes with tests.
-3. Run `pytest` and `ruff check llmscope tests` locally — both must pass.
+3. Run `pytest` and `ruff check LLmThoughtLens tests` locally — both must pass.
 4. Open a PR using the PR template and fill in all sections.
 5. A maintainer will review within a few business days.
 6. PRs require at least one approval and green CI before merge.
@@ -112,9 +112,9 @@ Types: `feat`, `fix`, `docs`, `chore`, `test`, `refactor`, `perf`, `ci`.
 Run the full check locally:
 
 ```bash
-ruff check llmscope tests
-ruff format llmscope tests
-mypy llmscope
+ruff check LLmThoughtLens tests
+ruff format LLmThoughtLens tests
+mypy LLmThoughtLens
 ```
 
 ---
@@ -126,7 +126,7 @@ mypy llmscope
 pytest
 
 # With coverage
-pytest --cov=llmscope --cov-report=term-missing
+pytest --cov=LLmThoughtLens --cov-report=term-missing
 
 # Run a specific file
 pytest tests/test_providers.py -v
@@ -139,9 +139,9 @@ marked `@pytest.mark.integration` and will be skipped in CI by default.
 
 ## Adding a Provider
 
-1. Create `llmscope/providers/<name>_provider.py`.
+1. Create `LLmThoughtLens/providers/<name>_provider.py`.
 2. Subclass `BaseProvider` and implement `run(prompt, **kwargs) -> ProviderOutput`.
-3. Register in `llmscope/providers/registry.py` inside `_register_builtins()`.
+3. Register in `LLmThoughtLens/providers/registry.py` inside `_register_builtins()`.
 4. Add the optional dependency group to `pyproject.toml`.
 5. Add tests in `tests/test_providers.py` (mock or integration-marked).
 6. Update `README.md`.
@@ -150,7 +150,7 @@ marked `@pytest.mark.integration` and will be skipped in CI by default.
 
 ## Adding a Probe
 
-1. Create `llmscope/probes/builtin/<name>.py` (or edit `builtin.py`).
+1. Create `LLmThoughtLens/probes/builtin/<name>.py` (or edit `builtin.py`).
 2. Subclass `BaseProbe` and implement `run(activations) -> ProbeResult`.
 3. Add tests in `tests/test_probes.py`.
 4. Document the probe in `docs/`.

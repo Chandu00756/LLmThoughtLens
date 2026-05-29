@@ -1,11 +1,10 @@
-"""Shared pytest fixtures for the llmscope test suite."""
+"""Shared pytest fixtures for the LLmThoughtLens test suite."""
 
 from __future__ import annotations
 
 import pytest
-
-from llmscope.providers.mock_provider import MockProvider
-from llmscope.providers.base import ProviderOutput
+from LLmThoughtLens.providers.base import ProviderOutput
+from LLmThoughtLens.providers.mock_provider import MockProvider
 
 
 @pytest.fixture(scope="session")

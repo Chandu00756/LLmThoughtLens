@@ -4,8 +4,8 @@
 
 **A platform-agnostic LLM interpretability toolkit for mechanistic transparency**
 
-[![PyPI version](https://img.shields.io/pypi/v/llmscope?color=01696f&logo=pypi&logoColor=white)](https://pypi.org/project/llmscope/)
-[![Python](https://img.shields.io/pypi/pyversions/llmscope?color=01696f)](https://pypi.org/project/llmscope/)
+[![PyPI version](https://img.shields.io/pypi/v/LLmThoughtLens?color=01696f&logo=pypi&logoColor=white)](https://pypi.org/project/LLmThoughtLens/)
+[![Python](https://img.shields.io/pypi/pyversions/LLmThoughtLens?color=01696f)](https://pypi.org/project/LLmThoughtLens/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-01696f.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-33%20passing-01696f)](tests/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
@@ -18,7 +18,7 @@
 
 ## What is LLmThoughtLens?
 
-LLmThoughtLens (`pip install llmscope`) is an open-source LLM interpretability framework built on the mechanistic principles from Anthropic's **Cross-Layer Transcoder** and *Biology of a Large Language Model* research (March 2025).
+LLmThoughtLens (`pip install LLmThoughtLens`) is an open-source LLM interpretability framework built on the mechanistic principles from Anthropic's **Cross-Layer Transcoder** and *Biology of a Large Language Model* research (March 2025).
 
 It extracts **sparse, monosemantic features**, traces how those features interact across layers as **attribution circuits**, and surfaces that structure as interactive visualisations — without requiring access to model weights. Whether you're working with the OpenAI API, a local HuggingFace model, or a mock provider for unit-tested research, the API stays the same.
 
@@ -40,22 +40,22 @@ It extracts **sparse, monosemantic features**, traces how those features interac
 
 ```bash
 # Core — MockProvider, no external API keys needed
-pip install llmscope
+pip install LLmThoughtLens
 
 # With OpenAI support
-pip install "llmscope[openai]"
+pip install "LLmThoughtLens[openai]"
 
 # With Anthropic Claude support
-pip install "llmscope[anthropic]"
+pip install "LLmThoughtLens[anthropic]"
 
 # With local HuggingFace models (torch + transformers)
-pip install "llmscope[huggingface]"
+pip install "LLmThoughtLens[huggingface]"
 
 # With local Ollama instance
-pip install "llmscope[ollama]"
+pip install "LLmThoughtLens[ollama]"
 
 # Everything at once
-pip install "llmscope[openai,anthropic,huggingface,ollama]"
+pip install "LLmThoughtLens[openai,anthropic,huggingface,ollama]"
 ```
 
 **Requirements:** Python ≥ 3.10
@@ -65,7 +65,7 @@ pip install "llmscope[openai,anthropic,huggingface,ollama]"
 ## Quick start
 
 ```python
-from llmscope import Scope
+from LLmThoughtLens import Scope
 
 # Zero-config: fully deterministic mock model — no API keys, no downloads
 scope = Scope.from_mock()
@@ -99,7 +99,7 @@ for pr in result.probe_results:
 
 ```python
 import numpy as np
-from llmscope.features.sae import SparseAutoencoder, SAEConfig
+from LLmThoughtLens.features.sae import SparseAutoencoder, SAEConfig
 
 # Train on captured activations (shape: n_samples × d_model)
 config = SAEConfig(input_dim=768, dict_size=3072, k=64, n_steps=5_000)
@@ -129,7 +129,7 @@ result = scope.report(
 ## Architecture
 
 ```
-llmscope/
+LLmThoughtLens/
 │
 ├── scope.py               ← Scope + TraceResult  (main entry point)
 │
@@ -204,10 +204,10 @@ BaseProvider.run()  →  ProviderOutput
 | Provider | Activations | Attention | Setup |
 |---|---|---|---|
 | `MockProvider` | ✅ NumPy (deterministic) | ✅ | None — built-in |
-| `HuggingFaceProvider` | ✅ Real hidden states | ✅ | `pip install "llmscope[huggingface]"` |
-| `OpenAIProvider` | ❌ Black-box | ❌ | API key + `pip install "llmscope[openai]"` |
-| `AnthropicProvider` | ❌ Black-box | ❌ | API key + `pip install "llmscope[anthropic]"` |
-| `OllamaProvider` | ❌ Black-box | ❌ | Running Ollama + `pip install "llmscope[ollama]"` |
+| `HuggingFaceProvider` | ✅ Real hidden states | ✅ | `pip install "LLmThoughtLens[huggingface]"` |
+| `OpenAIProvider` | ❌ Black-box | ❌ | API key + `pip install "LLmThoughtLens[openai]"` |
+| `AnthropicProvider` | ❌ Black-box | ❌ | API key + `pip install "LLmThoughtLens[anthropic]"` |
+| `OllamaProvider` | ❌ Black-box | ❌ | Running Ollama + `pip install "LLmThoughtLens[ollama]"` |
 
 Black-box providers still work — LLmThoughtLens falls back to a top-token importance proxy for feature extraction and an importance-product proxy for circuit tracing.
 
@@ -226,8 +226,8 @@ All probes return a `ProbeResult` with `score ∈ [0, 1]`, a `passed` flag, and 
 | `MotivatedReasoningProbe` | Planted wrong year for the French Revolution | Anthropic case study 10 |
 
 ```python
-from llmscope import Scope
-from llmscope.probes.builtin import MultiHopProbe
+from LLmThoughtLens import Scope
+from LLmThoughtLens.probes.builtin import MultiHopProbe
 
 scope = Scope.from_mock()
 result = scope.run_probe(MultiHopProbe())
@@ -274,13 +274,13 @@ print(result.score, result.meta["summary"])
 
 ```bash
 # Trace a prompt with the mock provider
-llmscope trace "The capital of France is"
+LLmThoughtLens trace "The capital of France is"
 
 # Trace with a real provider
-llmscope trace "Once upon a time" --provider openai --model gpt-4o-mini
+LLmThoughtLens trace "Once upon a time" --provider openai --model gpt-4o-mini
 
 # Show version
-llmscope version
+LLmThoughtLens version
 ```
 
 ---
@@ -290,7 +290,7 @@ llmscope version
 Extend `BaseProvider` to plug in any inference backend:
 
 ```python
-from llmscope.providers.base import BaseProvider, ProviderOutput
+from LLmThoughtLens.providers.base import BaseProvider, ProviderOutput
 import numpy as np
 
 class MyProvider(BaseProvider):
@@ -306,7 +306,7 @@ class MyProvider(BaseProvider):
             top_tokens=[("world", 0.9), ("there", 0.05)],
         )
 
-from llmscope import Scope
+from LLmThoughtLens import Scope
 scope = Scope.from_provider(MyProvider())
 result = scope.trace_full("Hello")
 ```
@@ -338,8 +338,8 @@ pip install -e ".[dev]"
 pytest tests/ -v
 
 # Lint
-ruff check llmscope/
-black --check llmscope/
+ruff check LLmThoughtLens/
+black --check LLmThoughtLens/
 ```
 
 ---
