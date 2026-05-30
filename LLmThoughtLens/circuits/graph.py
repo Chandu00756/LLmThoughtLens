@@ -248,6 +248,57 @@ class AttributionGraph:
         return pruned
 
     # ------------------------------------------------------------------
+    # Indirect / transitive influence
+    # ------------------------------------------------------------------
+
+    def indirect_influence(self, src: int, dst: int) -> float:
+        """Signed strength of the strongest *multi-hop* path from src→dst.
+
+        Direct (one-hop) edges are excluded — this is the indirect effect that
+        flows through intermediate nodes, matching the paper's notion of an
+        indirect contribution.  The strength of a path is the product of its
+        edge weights; we return the product of the path with the largest
+        absolute value.  Returns 0.0 if there is no path of length ≥ 2.
+        """
+        best = 0.0
+        # DFS over acyclic paths (graphs here are layered DAGs), excluding the
+        # direct edge so only transitive influence is counted.
+        stack: list[tuple[int, float, frozenset[int]]] = [(src, 1.0, frozenset({src}))]
+        while stack:
+            node, prod, seen = stack.pop()
+            for e in self._out.get(node, []):
+                if e.dst in seen:
+                    continue
+                new_prod = prod * e.weight
+                # Edges traversed to reach e.dst = len(seen) (seen has src + every
+                # intermediate node; the current edge is the len(seen)-th). >= 2
+                # means this is at least a two-hop path → genuinely indirect.
+                edges_to_dst = len(seen)
+                if e.dst == dst:
+                    if edges_to_dst >= 2 and abs(new_prod) > abs(best):
+                        best = new_prod
+                    # do not traverse through the sink
+                else:
+                    stack.append((e.dst, new_prod, seen | {e.dst}))
+        return float(best)
+
+    def indirect_edges(self, min_weight: float = 0.0) -> list[tuple[int, int, float]]:
+        """Return ``(src, dst, influence)`` for node pairs connected only
+        *transitively* (no direct edge) whose indirect influence ≥ ``min_weight``."""
+        direct = {(e.src, e.dst) for e in self._edges}
+        out: list[tuple[int, int, float]] = []
+        node_ids = list(self._nodes)
+        for s in node_ids:
+            for d in node_ids:
+                if s == d or (s, d) in direct:
+                    continue
+                infl = self.indirect_influence(s, d)
+                if abs(infl) >= min_weight and infl != 0.0:
+                    out.append((s, d, infl))
+        out.sort(key=lambda t: abs(t[2]), reverse=True)
+        return out
+
+    # ------------------------------------------------------------------
     # Paths
     # ------------------------------------------------------------------
 

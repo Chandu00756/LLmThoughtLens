@@ -63,6 +63,37 @@ class TraceResult:
         return self.graph.top_paths(n=n)
 
     # ------------------------------------------------------------------
+    # JSON payload for the live dashboard / API
+    # ------------------------------------------------------------------
+
+    def to_payload(self, max_features: int = 200) -> dict[str, Any]:
+        """Compose a JSON-safe dict from the existing per-object serializers.
+
+        Reuses :meth:`ProviderOutput.to_summary`, :meth:`Feature.as_dict`,
+        :meth:`AttributionGraph.to_dict`, and :meth:`ProbeResult.as_dict` so
+        there is a single source of truth for each object's serialization.
+        """
+        from LLmThoughtLens.circuits.paths import label_path, top_causal_paths
+
+        paths = top_causal_paths(self.graph, n=5)
+        return {
+            "prompt": self.prompt,
+            "output_token": self.output_token,
+            "top_tokens": [[t, float(p)] for t, p in self.top_tokens],
+            "evidence_kind": self.evidence_kind,
+            "provider": self.meta.get("provider", ""),
+            "model": self.meta.get("model", ""),
+            "summary": self.output.to_summary(),
+            "features": [f.as_dict() for f in self.features[:max_features]],
+            "supernodes": [s.as_dict() for s in self.supernodes],
+            "graph": self.graph.to_dict(),
+            "paths": [
+                {"label": label_path(self.graph, p), "log_score": p.log_score} for p in paths
+            ],
+            "probes": [r.as_dict() for r in self.probe_results],
+        }
+
+    # ------------------------------------------------------------------
     # Visualisation entry points
     # ------------------------------------------------------------------
 
@@ -376,3 +407,52 @@ def _empty_graph() -> AttributionGraph:
     from LLmThoughtLens.circuits.graph import AttributionGraph
 
     return AttributionGraph(name="(empty)")
+
+
+# ---------------------------------------------------------------------------
+# Before / after intervention comparison
+# ---------------------------------------------------------------------------
+
+
+def compare_traces(
+    baseline: TraceResult,
+    intervention: TraceResult,
+    threshold: float = 0.01,
+) -> Any:
+    """Diff two traces (baseline vs intervention) → a :class:`GraphDiff`.
+
+    The diff reports nodes added/removed and edges whose weight moved by more
+    than *threshold* — the concrete causal effect of the intervention.
+    """
+    from LLmThoughtLens.circuits.diff import GraphDiff
+
+    return GraphDiff.compute(baseline.graph, intervention.graph, threshold=threshold)
+
+
+def save_intervention_report(
+    baseline: TraceResult,
+    intervention: TraceResult,
+    path: str | Path,
+    threshold: float = 0.01,
+) -> Any:
+    """Write a before/after HTML intervention report and return the diff.
+
+    Three tabs: the baseline attribution graph, the intervention graph, and a
+    side-by-side diff (added / removed / changed edges).
+    """
+    from LLmThoughtLens.visualization.graph_viz import GraphVisualizer
+    from LLmThoughtLens.visualization.report import ReportBuilder
+
+    diff = compare_traces(baseline, intervention, threshold=threshold)
+    builder = ReportBuilder(
+        title="LLmThoughtLens — Intervention Report (before / after)",
+        prompt=baseline.prompt,
+        evidence_kind=baseline.evidence_kind,
+    )
+    builder.add_tab("baseline", "Baseline Graph", GraphVisualizer(baseline.graph).to_html())
+    builder.add_tab(
+        "intervention", "Intervention Graph", GraphVisualizer(intervention.graph).to_html()
+    )
+    builder.add_tab("diff", "Before / After Diff", diff.to_html())
+    builder.save(path)
+    return diff

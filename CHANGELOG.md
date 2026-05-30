@@ -29,8 +29,50 @@ build-tracking document.
   `(L, T, D)` / `(L, H, T, T)` tensors, supports `run_with_intervention`
   via real PyTorch `forward_pre_hook` on each block's MLP submodule.
 - `OllamaProvider` — local Ollama HTTP adapter with `ping()` health check.
+  Requests real per-token `logprobs` (Ollama ≥ 0.12) and exposes them as
+  graded probabilities in `top_tokens`, so black-box token-masking yields
+  meaningful (non-saturated) causal scores; falls back to the sampled token
+  on older servers.
 - Lazy provider registry: `list_providers()`, `available_providers()`,
   `get_provider()`, `register_provider()`.
+
+### Added — Live dashboard, proxy & SDK
+
+- `LLmThoughtLens serve` launches a FastAPI app (`LLmThoughtLens.server`) with
+  a no-build single-page dashboard (served from the wheel): provider config with
+  masked keys + live **Test**, real-time trace rendering (token heatmap,
+  attribution graph, feature browser, probe panel) over a WebSocket, light/dark
+  theme, and smooth CSS transitions.
+- **Provider-compatible proxy**: OpenAI-compatible `POST /v1/chat/completions`
+  and Anthropic-compatible `POST /v1/messages`. Forwards the upstream response
+  **verbatim** (the calling app is never altered) and tees a live
+  `proxy_exchange` event with the real next-token distribution (zero extra API
+  cost — no masking on the proxy path).
+- **Live LLM X-ray** (`POST /api/xray/stream`): the white-box view an API
+  model can never give. For every generated token it streams, from the model's
+  own forward pass: a **logit lens** (each layer's residual stream projected
+  through the real final-norm + unembedding → watch the answer *form* from the
+  bottom layer to the top), an (n_layers × n_tokens) residual-stream activation
+  grid, and the last layer's head-averaged attention. Works on any local
+  HuggingFace causal LM, including a model you trained yourself.
+- **White-box thinking stream** (`POST /api/whitebox/stream`): real
+  token-by-token generation on a local HF model, emitting per-layer
+  residual-stream norms live, then a full attribution trace.
+- `EventBus` async pub/sub; `/api/ingest` lets an external process push events
+  into the dashboard.
+- **SDK** (`LLmThoughtLens.sdk`): `trace()`, `observe()` context manager,
+  `record_exchange()`, and `wrap_openai()` drop-in (returns the real response
+  untouched; observation failures never break the caller).
+- `TraceResult.to_payload()` — single JSON serialiser composing the existing
+  per-object serialisers, used by the API/dashboard.
+
+### Fixed
+
+- `MockProvider` now seeds from a process-stable BLAKE2 hash instead of Python's
+  per-process-salted `hash()`, making its output byte-for-byte reproducible
+  across runs and machines.
+- `CircuitTracer` labels black-box input nodes from the **prompt** tokens (not
+  the completion), so masking-attribution edges show correct source labels.
 
 ### Added — Sparse Autoencoder (Phase 5)
 

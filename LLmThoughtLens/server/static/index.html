@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LLmThoughtLens — Live Interpretability</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="tl-top">
+    <div class="tl-brand">
+      <div class="tl-logo"></div>
+      <div>LLmThoughtLens <small>live interpretability</small></div>
+    </div>
+    <div class="spacer"></div>
+    <div class="tl-conn"><span class="dot" id="ws-dot"></span><span id="ws-label">connecting…</span></div>
+    <button class="icon-btn" id="theme-btn">◐ theme</button>
+  </header>
+
+  <main>
+    <!-- Sidebar: provider config -->
+    <aside class="sidebar">
+      <div class="card">
+        <h3>Provider</h3>
+        <select id="provider-select">
+          <option value="ollama">Ollama (local, black-box)</option>
+          <option value="huggingface">HuggingFace (local, white-box)</option>
+          <option value="openai">OpenAI (black-box)</option>
+          <option value="anthropic">Anthropic (black-box)</option>
+          <option value="mock">Mock (offline demo)</option>
+        </select>
+
+        <label class="field" id="key-label">API key</label>
+        <input type="password" id="key-input" placeholder="leave blank to use env var" autocomplete="off" />
+        <div id="key-status" class="note"></div>
+
+        <label class="field">Model</label>
+        <input type="text" id="model-input" placeholder="model id" />
+
+        <label class="field" id="url-label">Base URL</label>
+        <input type="text" id="url-input" placeholder="http://localhost:11434" />
+
+        <div class="row" style="margin-top:12px">
+          <button class="btn secondary" id="test-btn">Test</button>
+          <button class="btn" id="save-btn">Save</button>
+        </div>
+        <div class="test-result" id="test-result"></div>
+        <div class="note" id="provider-note"></div>
+      </div>
+
+      <div class="card">
+        <h3>Trace defaults</h3>
+        <label class="field">Top-k features</label>
+        <input type="number" id="topk-input" value="20" min="1" max="200" />
+        <label class="field">Attribution threshold</label>
+        <input type="number" id="thr-input" value="0.05" step="0.01" min="0" max="1" />
+        <button class="btn secondary" id="defaults-btn" style="margin-top:12px;width:100%">Save defaults</button>
+      </div>
+
+      <div class="card">
+        <h3>Middle-layer proxy</h3>
+        <p class="note">
+          Point any app's OpenAI base URL at
+          <b id="proxy-url">http://127.0.0.1:8000/v1</b> and every request flows
+          through here and appears live in the <b>Live Proxy</b> tab. The
+          upstream response is returned untouched. Closed apps that don't allow a
+          custom base URL can't be intercepted — that's by design, not a bug.
+        </p>
+        <button class="icon-btn" id="copy-proxy" style="margin-top:8px">copy proxy URL</button>
+      </div>
+    </aside>
+
+    <!-- Workspace -->
+    <section class="workspace">
+      <div class="card">
+        <div class="prompt-bar">
+          <textarea id="prompt-input" placeholder="Type a prompt and trace what the model is really doing…">The capital of the state containing Dallas is</textarea>
+          <div class="prompt-actions">
+            <button class="btn" id="xray-btn">🔬 X-ray</button>
+            <button class="btn secondary" id="trace-btn">▶ Trace</button>
+            <button class="btn secondary" id="whitebox-btn">🧠 Residual stream</button>
+          </div>
+        </div>
+        <div class="badges" id="badges" style="margin-top:12px">
+          <span class="muted">No trace yet.</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="tabs" id="tabs">
+          <div class="tab active" data-tab="xray">🔬 LLM X-ray</div>
+          <div class="tab" data-tab="heatmap">Token Heatmap</div>
+          <div class="tab" data-tab="graph">Attribution Graph</div>
+          <div class="tab" data-tab="stream">Residual Stream</div>
+          <div class="tab" data-tab="features">Feature Browser</div>
+          <div class="tab" data-tab="probes">Probes</div>
+          <div class="tab" data-tab="proxy">Live Proxy</div>
+        </div>
+
+        <div class="panel active" id="panel-xray">
+          <p class="note">The white-box X-ray reads the model's own hidden states as it generates.
+            The <b>logit lens</b> shows what each layer is predicting — watch the answer form from the
+            bottom layer to the top. Requires a <b>local model</b> (HuggingFace); an API model can't be opened up.</p>
+          <div id="xray-banner" class="xray-banner" style="display:none"></div>
+          <div class="xray-grid">
+            <div class="xray-lens-wrap">
+              <h4 class="xray-h">Logit lens — prediction per layer</h4>
+              <div id="xray-lens" class="xray-lens"><div class="center-empty">Press <b>🔬 X-ray</b> below.</div></div>
+            </div>
+            <div class="xray-plots">
+              <h4 class="xray-h">Residual-stream activation (layer × token)</h4>
+              <div id="xray-grid-plot"></div>
+              <h4 class="xray-h">Attention (last layer, head-averaged)</h4>
+              <div id="xray-attn-plot"></div>
+            </div>
+          </div>
+          <div class="tok-stream" id="xray-tokens"></div>
+        </div>
+        <div class="panel" id="panel-heatmap"><div id="heatmap-plot"></div><div id="heatmap-empty" class="center-empty">Run a trace to see per-token activation.</div></div>
+        <div class="panel" id="panel-graph"><div id="graph-plot"></div><div id="graph-empty" class="center-empty">Run a trace to see the attribution graph.</div></div>
+        <div class="panel" id="panel-stream">
+          <div id="stream-plot"></div>
+          <div class="tok-stream" id="tok-stream"></div>
+          <div id="stream-empty" class="center-empty">Use <b>White-box stream</b> with a local HuggingFace model to watch the residual stream build live.</div>
+        </div>
+        <div class="panel" id="panel-features">
+          <input type="search" id="feature-search" placeholder="filter features by label…" style="margin-bottom:10px" />
+          <div id="features-table"></div>
+          <div id="features-empty" class="center-empty">Run a trace to browse features.</div>
+        </div>
+        <div class="panel" id="panel-probes"><div id="probes-list"></div><div id="probes-empty" class="center-empty">Enable “run probes” on a trace, or use the benchmark CLI.</div></div>
+        <div class="panel" id="panel-proxy">
+          <p class="note">Live API traffic routed through the ThoughtLens proxy. Real prompts, real completions, real next-token distributions.</p>
+          <div class="eventlog" id="proxy-log"><div class="center-empty">No proxied requests yet.</div></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Event stream</h3>
+        <div class="eventlog" id="event-log"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="tl-foot">LLmThoughtLens · live dashboard · evidence is labelled white-box (real activations) or black-box (API logprobs / masking) — never both.</footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

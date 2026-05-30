@@ -71,6 +71,22 @@ __all__ = [
     "ProbeResult",
     "ProbeRunner",
     "ReportBuilder",
+    "observe",
+    "wrap_openai",
+    "record_exchange",
+    "attach",
+    "ObservedSession",
+    "ModelLens",
 ]
+
+# SDK helpers for observing your own app (lazy provider/torch imports inside).
+from LLmThoughtLens.sdk import (  # noqa: E402
+    ModelLens,
+    ObservedSession,
+    attach,
+    observe,
+    record_exchange,
+    wrap_openai,
+)
 
 __version__ = "0.1.0"

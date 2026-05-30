@@ -19,6 +19,7 @@ Optional extras:
 | `LLmThoughtLens[huggingface]` | `HuggingFaceProvider` + `SparseAutoencoder` (real PyTorch training) + `ActivationCache` |
 | `LLmThoughtLens[ollama]` | `OllamaProvider` |
 | `LLmThoughtLens[tui]` | the Textual terminal UI + `rapidfuzz` |
+| `LLmThoughtLens[server]` | the live web dashboard + provider-compatible proxy (FastAPI/uvicorn) |
 | `LLmThoughtLens[all]` | everything above |
 
 ## 60-second smoke check (no API key required)
@@ -34,6 +35,70 @@ print(len(result.features))           # extracted features
 print(result.graph.num_nodes)         # attribution graph nodes
 print(result.graph.num_edges)         # attribution graph edges
 result.save("report.html")            # self-contained HTML report
+```
+
+## Live dashboard (the fastest way to see it work)
+
+```bash
+pip install 'LLmThoughtLens[server]'
+LLmThoughtLens serve            # opens http://127.0.0.1:8000 in your browser
+```
+
+In the dashboard you can:
+
+- pick a provider (Ollama / HuggingFace / OpenAI / Anthropic / mock), enter and
+  **Test** its key/URL live;
+- type a prompt and watch a trace render in real time (token heatmap,
+  attribution graph, feature browser, probes);
+- run a **white-box thinking stream** on a local HuggingFace model — every
+  generated token streams its real per-layer residual-stream norms;
+- route any app through the **proxy** and watch its traffic live.
+
+Everything updates over a WebSocket; nothing is pre-baked.
+
+## Middle layer — proxy any app through ThoughtLens
+
+Start the server, then point any app that supports a custom OpenAI base URL at
+`http://127.0.0.1:8000/v1`. Each request is forwarded **verbatim** to the real
+upstream (the app's response is unchanged) and tee'd to the dashboard's
+**Live Proxy** tab with the real next-token distribution.
+
+```bash
+# Example: route the OpenAI Python client through ThoughtLens
+export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
+python -c "
+from openai import OpenAI
+c = OpenAI()                       # base_url picked up from env
+print(c.chat.completions.create(
+    model='gpt-4o-mini',
+    messages=[{'role':'user','content':'The capital of France is'}],
+).choices[0].message.content)
+"
+```
+
+> Honest limitation: this only observes traffic that is *routed through* the
+> proxy. Closed apps that hardcode their endpoint (e.g. the Claude desktop app)
+> cannot be silently intercepted — by design.
+
+## SDK — observe your own app in three lines
+
+```python
+# 1) One-shot trace, optionally streamed to a running dashboard
+from LLmThoughtLens.sdk import trace
+r = trace("The capital of France is", provider="ollama", model="llama3.1:8b",
+          dashboard="http://localhost:8000")
+print(r.output_token, r.top_features(3))
+
+# 2) Drop-in wrapper over an OpenAI-style client (response returned untouched)
+from openai import OpenAI
+from LLmThoughtLens.sdk import wrap_openai
+client = wrap_openai(OpenAI(), dashboard="http://localhost:8000")
+client.chat.completions.create(model="gpt-4o-mini",
+                               messages=[{"role": "user", "content": "hi"}])
+
+# 3) Record an exchange your own stack already produced
+from LLmThoughtLens.sdk import record_exchange
+record_exchange("my prompt", "my completion", dashboard="http://localhost:8000")
 ```
 
 ## Provider 1 — OpenAI (real logprobs, black-box)
@@ -169,6 +234,7 @@ each rendered from real numerical data (no placeholders):
 ```bash
 LLmThoughtLens version
 LLmThoughtLens providers                       # which extras are installed
+LLmThoughtLens serve                           # live web dashboard + proxy
 LLmThoughtLens trace "Dallas is in" --provider mock --output report.html
 LLmThoughtLens probe --provider mock           # scorecard for all 10 probes
 LLmThoughtLens benchmark --provider mock --output bench.json

@@ -280,6 +280,39 @@ def cmd_version(_argv: list[str]) -> int:
     return 0
 
 
+def cmd_serve(argv: list[str]) -> int:
+    """Launch the live web dashboard + provider-compatible proxy."""
+    import argparse
+
+    p = argparse.ArgumentParser(
+        prog="LLmThoughtLens serve",
+        description=(
+            "Start the live interpretability dashboard. Open the printed URL in a "
+            "browser to configure providers, trace prompts live, and route apps "
+            "through the OpenAI-compatible proxy at <url>/v1."
+        ),
+    )
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--no-open", action="store_true", help="do not open the browser automatically")
+    args = p.parse_args(argv)
+
+    try:
+        from LLmThoughtLens.server.app import run_server
+    except ImportError:
+        _console.print(
+            "[red]The dashboard needs the 'server' extra.[/red]\n"
+            "Install with: [b]pip install 'LLmThoughtLens[server]'[/b]"
+        )
+        return 1
+
+    url = f"http://{args.host}:{args.port}/"
+    _console.print(f"[b]LLmThoughtLens Live[/b] → {url}")
+    _console.print(f"OpenAI-compatible proxy → [b]{url}v1[/b]  (point any app's base URL here)")
+    run_server(host=args.host, port=args.port, open_browser=not args.no_open)
+    return 0
+
+
 def cmd_benchmark(argv: list[str]) -> int:
     """Run the full 10-probe battery, dump JSON, print a Rich scorecard."""
     import argparse
@@ -343,6 +376,7 @@ def cmd_benchmark(argv: list[str]) -> int:
 
 
 _COMMANDS = {
+    "serve": cmd_serve,
     "tui": cmd_tui,
     "trace": cmd_trace,
     "probe": cmd_probe,

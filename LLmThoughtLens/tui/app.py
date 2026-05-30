@@ -18,19 +18,41 @@ class LLmThoughtLensApp(App):
     """Top-level Textual app — pushes the home screen, holds session state."""
 
     TITLE = "LLmThoughtLens"
-    SUB_TITLE = "interpretability TUI"
+    SUB_TITLE = "live interpretability"
     CSS = """
-    Screen { layout: vertical; }
-    #title { padding: 1 2; }
+    Screen { layout: vertical; background: $surface-darken-1; }
+    Header { background: #01696f; color: #ffffff; text-style: bold; }
+    Footer { background: $panel; }
+
+    #title {
+        padding: 1 2;
+        text-style: bold;
+        color: #01a0aa;
+        border-bottom: heavy #01696f;
+    }
+    #summary { padding: 0 2 1 2; color: $text-muted; }
+
     #connect-body { padding: 1 2; }
     #connect-actions { padding: 1 0; }
     #trace-actions { padding: 1 0; }
     #loading { dock: bottom; height: 1; }
-    #trace-output { padding: 1 2; }
+    #trace-output { padding: 1 2; border: round #2f382e; }
+    #heatmap-render { padding: 1 0; }
     #probe-list { height: 1fr; padding: 1 2; }
-    #probe-summary { padding: 1 2; }
+    #probe-summary { padding: 1 2; text-style: bold; color: #d19900; }
     #history-scroll { height: 1fr; padding: 0 2; }
-    Button { margin: 0 1; }
+
+    Input, Select { border: tall #2f382e; }
+    Input:focus, Select:focus { border: tall #01a0aa; }
+    Label { color: $text-muted; }
+
+    Button { margin: 0 1; text-style: bold; }
+    Button.-primary { background: #01696f; }
+    Button.-success { background: #437a22; }
+
+    #connect-status, #export-status { padding: 1 0; color: #d19900; }
+    ProbeProgress { padding: 0 2; }
+    AsciiAttributionGraph { border: round #01696f; padding: 1 2; }
     """
 
     BINDINGS = [

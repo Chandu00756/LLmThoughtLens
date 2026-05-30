@@ -92,6 +92,22 @@ header.tl-header .tl-evidence { display: inline-block; padding: 2px 8px; border-
 .probe-detail pre { background: #f4f3ef; padding: 8px 12px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
 .probe-overall { font-size: 1.05rem; padding: 6px 0 12px; }
 .tl-footer { text-align: center; color: %(muted)s; font-size: 0.78rem; margin-top: 28px; }
+.tl-theme-btn { float: right; cursor: pointer; border: 1px solid rgba(255,255,255,0.4);
+  background: rgba(255,255,255,0.12); color: #fff; border-radius: 8px; padding: 4px 10px;
+  font-size: 0.75rem; }
+.tl-legend { font-size: 0.74rem; margin-top: 8px; opacity: 0.9; }
+.tl-legend b { font-weight: 700; }
+/* Dark mode: respects the OS setting, and a manual toggle via [data-theme]. */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme="light"]) body { background: #15140f; color: #ece7da; }
+  html:not([data-theme="light"]) .tl-tab-panel { background: #1f1c16; border-color: #322d22; }
+  html:not([data-theme="light"]) .tl-tab-btn { background: #2a261d; color: #cfc8b6; }
+  html:not([data-theme="light"]) .probe-detail pre { background: #15140f; }
+}
+html[data-theme="dark"] body { background: #15140f; color: #ece7da; }
+html[data-theme="dark"] .tl-tab-panel { background: #1f1c16; border-color: #322d22; }
+html[data-theme="dark"] .tl-tab-btn { background: #2a261d; color: #cfc8b6; }
+html[data-theme="dark"] .probe-detail pre { background: #15140f; }
 """
     % {  # noqa: UP031  (CSS contains `{}` so %-formatting is the cleanest interpolation)
         "bg": THOUGHTLENS_COLORS["bg"],
@@ -114,6 +130,11 @@ function tlsShowTab(id) {
       window.Plotly.Plots.resize(el);
     });
   }
+}
+function tlsToggleTheme() {
+  var h = document.documentElement;
+  var cur = h.getAttribute('data-theme');
+  h.setAttribute('data-theme', cur === 'dark' ? 'light' : 'dark');
 }
 """
 
@@ -184,6 +205,7 @@ class ReportBuilder:
         sub = " &middot; ".join(sub_parts)
         generated = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         extra_js = "\n".join(self._extra_js)
+        legend = _evidence_legend(self.evidence_kind)
 
         return (
             "<!DOCTYPE html>\n<html lang='en'>\n<head>\n"
@@ -191,8 +213,11 @@ class ReportBuilder:
             f'<script src="{_PLOTLY_CDN}"></script>\n'
             f"<style>{_CSS}</style>\n"
             "</head>\n<body>\n"
-            f'<header class="tl-header"><h1>{html.escape(self.title)}</h1>'
+            f'<header class="tl-header">'
+            '<button class="tl-theme-btn" onclick="tlsToggleTheme()">◐ theme</button>'
+            f"<h1>{html.escape(self.title)}</h1>"
             f'<div class="tl-sub">{sub} &middot; generated {generated}</div>'
+            f'<div class="tl-legend">{legend}</div>'
             "</header>\n"
             f'<div class="tl-tabbar">{tab_buttons}</div>\n'
             f"{panels}\n"
@@ -275,3 +300,20 @@ class ReportBuilder:
 
     def __repr__(self) -> str:
         return f"ReportBuilder(title={self.title!r}, tabs={len(self._tabs)})"
+
+
+def _evidence_legend(evidence_kind: str) -> str:
+    """Explain the observation taxonomy so a reader never over-trusts a number.
+
+    * **observed** — measured directly from real activations (white-box).
+    * **inferred** — derived from real output probabilities / logprobs (black-box).
+    * **approximated** — estimated by input perturbation / token masking (black-box).
+    """
+    this = "observed" if evidence_kind == "white_box" else "inferred / approximated"
+    return (
+        "<b>Evidence key:</b> "
+        "<b>observed</b> = measured directly from real activations (white-box) &middot; "
+        "<b>inferred</b> = from real output probabilities / logprobs (black-box) &middot; "
+        "<b>approximated</b> = estimated by input perturbation / token masking (black-box). "
+        f"This trace is <b>{html.escape(evidence_kind)}</b> ({this})."
+    )

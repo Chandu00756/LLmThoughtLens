@@ -8,6 +8,7 @@ API key, GPU, or network.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 import numpy as np
@@ -15,6 +16,15 @@ import numpy as np
 from LLmThoughtLens.providers.base import BaseProvider, ProviderOutput
 from LLmThoughtLens.utils.math_utils import softmax
 from LLmThoughtLens.utils.tokenizer_utils import whitespace_tokens
+
+
+def _stable_hash(text: str) -> int:
+    """Process-stable 32-bit hash (BLAKE2) — unlike builtin ``hash()`` which
+    is salted per process via ``PYTHONHASHSEED`` and would make the mock
+    non-reproducible across runs."""
+    digest = hashlib.blake2b(text.encode("utf-8"), digest_size=4).digest()
+    return int.from_bytes(digest, "big")
+
 
 _FAKE_VOCAB: tuple[str, ...] = (
     "<pad>",
@@ -80,8 +90,8 @@ class MockProvider(BaseProvider):
     vocab_size:
         Defaults to the size of the built-in fake vocabulary.
     seed:
-        Mixed with ``hash(prompt)`` so identical prompts give identical
-        outputs while distinct prompts diverge.
+        Mixed with a process-stable hash of the prompt so identical prompts
+        give byte-identical outputs while distinct prompts diverge.
     """
 
     evidence_kind = "white_box"
@@ -140,7 +150,7 @@ class MockProvider(BaseProvider):
         tokens = whitespace_tokens(prompt)
         n_tokens = len(tokens)
 
-        token_ids = [abs(hash(t)) % self.vocab_size for t in tokens]
+        token_ids = [_stable_hash(t) % self.vocab_size for t in tokens]
 
         activations = self._activations(rng, n_tokens)
         if interventions:
@@ -191,7 +201,10 @@ class MockProvider(BaseProvider):
     # ------------------------------------------------------------------
 
     def _rng_for(self, prompt: str) -> np.random.Generator:
-        mix = (self.seed * 0x9E3779B1) ^ (abs(hash(prompt)) & 0x7FFFFFFF)
+        # Use a STABLE hash (not Python's per-process-salted hash()) so the
+        # mock is byte-for-byte reproducible across processes and machines —
+        # a hard requirement for deterministic tests and shareable demos.
+        mix = (self.seed * 0x9E3779B1) ^ (_stable_hash(prompt) & 0x7FFFFFFF)
         return np.random.default_rng(mix & 0xFFFFFFFF)
 
     def _activations(self, rng: np.random.Generator, n_tokens: int) -> np.ndarray:

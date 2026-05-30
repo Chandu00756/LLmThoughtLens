@@ -106,7 +106,12 @@ class CircuitTracer:
             )
 
     def _add_input_nodes(self, graph: AttributionGraph, output: ProviderOutput) -> None:
-        for i, tok in enumerate(output.tokens):
+        # White-box: ``output.tokens`` IS the tokenised prompt, so feature
+        # token_idx values index straight into it.  Black-box: ``output.tokens``
+        # is the *completion*, but the masking engine scores the *prompt*
+        # tokens (whitespace split), so input nodes must reflect the prompt.
+        input_tokens = output.tokens if output.has_internals else whitespace_tokens(output.prompt)
+        for i, tok in enumerate(input_tokens):
             graph.add_node(
                 _INPUT_OFFSET + i,
                 label=tok,

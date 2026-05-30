@@ -222,9 +222,11 @@ class TraceScreen(Screen):
             )
         )
         save_config(self.cfg)
-        self._render(result)
+        self._render_result(result)
 
-    def _render(self, result: TraceResult) -> None:
+    def _render_result(self, result: TraceResult) -> None:
+        # NOTE: must NOT be named ``_render`` — that collides with Textual's
+        # internal ``Widget._render()`` and crashes the screen on draw.
         self.query_one("#loading", LoadingIndicator).display = False
         self.query_one("#heatmap-render", Static).update(_ascii_heatmap(result))
         self.query_one("#features-render", Static).update(_ascii_features(result))
