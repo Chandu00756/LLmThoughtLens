@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from rich.markup import escape as escape_markup
 from rich.table import Table
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -21,6 +22,7 @@ from textual.widgets import (
     Static,
 )
 
+from LLmThoughtLens.providers.defaults import DEFAULT_MODELS, DEFAULT_OLLAMA_URL
 from LLmThoughtLens.tui.config import SessionEntry, TUIConfig, save_config
 from LLmThoughtLens.tui.widgets import AsciiAttributionGraph, FuzzyList, ProbeProgress
 
@@ -66,7 +68,10 @@ class ConnectScreen(Screen):
             yield Label("Model id")
             yield Input(
                 value=self.cfg.model,
-                placeholder="gpt-4o-mini / claude-3-5-haiku / gpt2 / …",
+                placeholder=" / ".join(
+                    DEFAULT_MODELS[p] for p in ("openai", "anthropic", "huggingface", "ollama")
+                )
+                + " / …",
                 id="model-input",
             )
             yield Label("API key (masked)")
@@ -77,9 +82,7 @@ class ConnectScreen(Screen):
                 id="key-input",
             )
             yield Label("Base URL (Ollama / Azure / proxy)")
-            yield Input(
-                value=self.cfg.base_url, placeholder="http://localhost:11434", id="url-input"
-            )
+            yield Input(value=self.cfg.base_url, placeholder=DEFAULT_OLLAMA_URL, id="url-input")
             yield Checkbox(
                 "save key to ~/.LLmThoughtLens/config.json",
                 value=self.cfg.save_api_key,
@@ -545,22 +548,18 @@ class HomeScreen(Screen):
 
 
 def build_provider_from_config(cfg: TUIConfig):
+    """Instantiate the configured provider, or ``None`` if that fails.
+
+    Empty model / base URL fall back to :mod:`LLmThoughtLens.providers.defaults`.
+    The TUI keeps a single base-URL field shared by every provider, so it is
+    only forwarded to Ollama — a URL left over from an Ollama session must not
+    redirect OpenAI/Anthropic traffic.
+    """
+    from LLmThoughtLens.providers.defaults import provider_kwargs
     from LLmThoughtLens.providers.registry import get_provider
 
-    kwargs: dict = {}
-    if cfg.provider == "openai":
-        kwargs = {"model": cfg.model or "gpt-4o-mini", "api_key": cfg.api_key or None}
-    elif cfg.provider == "anthropic":
-        kwargs = {"model": cfg.model or "claude-3-5-haiku-20241022", "api_key": cfg.api_key or None}
-    elif cfg.provider == "huggingface":
-        kwargs = {"model_name": cfg.model or "gpt2"}
-    elif cfg.provider == "ollama":
-        kwargs = {
-            "model": cfg.model or "llama3.2",
-            "base_url": cfg.base_url or "http://localhost:11434",
-        }
-    elif cfg.provider == "mock":
-        kwargs = {}
+    base_url = cfg.base_url if cfg.provider == "ollama" else None
+    kwargs = provider_kwargs(cfg.provider, cfg.model, api_key=cfg.api_key, base_url=base_url)
     try:
         return get_provider(cfg.provider, **kwargs)
     except Exception:  # noqa: BLE001
@@ -573,25 +572,40 @@ def _now_short() -> str:
     return datetime.datetime.now().strftime("%m-%d %H:%M")
 
 
+_HEAT_BARS = "▁▂▃▄▅▆▇█"
+
+
+def _heat_bucket(value: float, max_value: float, n_buckets: int = len(_HEAT_BARS)) -> int:
+    """Bucket index in ``[0, n_buckets)`` for *value* on a ``[0, max_value]`` scale.
+
+    Rounds to the nearest bucket, so the maximum always lands in the top
+    bucket and zero (or an all-zero row) in the bottom one.
+    """
+    if max_value <= 0.0 or value <= 0.0:
+        return 0
+    frac = min(1.0, value / max_value)
+    return min(n_buckets - 1, int(frac * (n_buckets - 1) + 0.5))
+
+
 def _ascii_heatmap(result: TraceResult) -> str:
     tokens = result.output.tokens or ["<empty>"]
-    # Aggregate score per token
+    # Aggregate positive feature score per token position.
     agg = dict.fromkeys(range(len(tokens)), 0.0)
     for f in result.features:
-        if f.token_idx < len(tokens):
+        if 0 <= f.token_idx < len(tokens):
             agg[f.token_idx] += max(0.0, f.score)
-    max_s = max(agg.values()) if agg else 1.0
-    bars = "▁▂▃▄▅▆▇█"
+    max_s = max(agg.values()) if agg else 0.0
     lines: list[str] = []
-    line1 = "  ".join(tokens)
-    lines.append(f"output → [b]{result.output_token}[/b]  ({result.output.output_prob:.2f})")
+    # Tokens are user/model text inside a markup string: escape ``[`` so a
+    # prompt like "[INST] …" renders literally instead of as Rich markup.
+    line1 = "  ".join(escape_markup(t) for t in tokens)
+    out_tok = escape_markup(result.output_token)
+    lines.append(f"output → [b]{out_tok}[/b]  ({result.output.output_prob:.2f})")
     lines.append("")
     lines.append(line1)
     bar_row = ""
     for i, _t in enumerate(tokens):
-        frac = agg[i] / (max_s + 1e-9)
-        idx = min(len(bars) - 1, int(frac * (len(bars) - 1)))
-        bar_row += bars[idx] + " " * (len(tokens[i]) + 1)
+        bar_row += _HEAT_BARS[_heat_bucket(agg[i], max_s)] + " " * (len(tokens[i]) + 1)
     lines.append(bar_row)
     return "\n".join(lines)
 

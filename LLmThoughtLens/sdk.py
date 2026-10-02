@@ -7,7 +7,7 @@ integration styles:
    prompt, optionally streaming the result to a running dashboard::
 
        from LLmThoughtLens.sdk import trace
-       r = trace("The capital of France is", provider="ollama", model="llama3.1:8b")
+       r = trace("The capital of France is", provider="ollama", model="llama3.2")
        print(r.output_token, r.top_features(3))
 
 2. **Wrap a client you already use** — drop-in over an OpenAI-style client so
@@ -34,7 +34,6 @@ own local dashboard URL.
 from __future__ import annotations
 
 import contextlib
-import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
@@ -56,20 +55,14 @@ def _build_provider(
     base_url: str | None = None,
     **kwargs: Any,
 ) -> BaseProvider:
+    from LLmThoughtLens.providers.defaults import provider_kwargs
     from LLmThoughtLens.providers.registry import get_provider
 
+    # Explicit **kwargs win; anything unset falls back to the shared defaults
+    # in LLmThoughtLens.providers.defaults (overridable via env vars).
     pk: dict[str, Any] = dict(kwargs)
-    if provider == "openai":
-        pk.setdefault("model", model or "gpt-4o-mini")
-        pk.setdefault("api_key", api_key or os.environ.get("OPENAI_API_KEY"))
-    elif provider == "anthropic":
-        pk.setdefault("model", model or "claude-3-5-haiku-20241022")
-        pk.setdefault("api_key", api_key or os.environ.get("ANTHROPIC_API_KEY"))
-    elif provider == "huggingface":
-        pk.setdefault("model_name", model or "gpt2")
-    elif provider == "ollama":
-        pk.setdefault("model", model or "llama3.1:8b")
-        pk.setdefault("base_url", base_url or "http://localhost:11434")
+    for key, value in provider_kwargs(provider, model, api_key=api_key, base_url=base_url).items():
+        pk.setdefault(key, value)
     return get_provider(provider, **pk)
 
 
@@ -163,7 +156,7 @@ def observe(
 
     Example::
 
-        with observe(provider="ollama", model="llama3.1:8b",
+        with observe(provider="ollama", model="llama3.2",
                      dashboard="http://localhost:8000") as obs:
             r = obs.trace("The capital of France is")
             print(r.output_token)

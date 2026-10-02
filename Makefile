@@ -1,4 +1,4 @@
-.PHONY: install dev lint fmt typecheck test smoke clean help \
+.PHONY: install dev lint fmt typecheck test coverage smoke clean help \
         release-check publish-test publish benchmark
 
 PYTHON ?= python3
@@ -28,9 +28,13 @@ fmt:
 typecheck:
 	@$(VENV)/bin/mypy $(PKG)
 
-## Run the full pytest suite
+## Run the full pytest suite (offline: never downloads model weights)
 test:
-	@$(VENV)/bin/pytest tests/
+	@HF_HUB_OFFLINE=1 $(VENV)/bin/pytest tests/
+
+## Run the suite with the coverage gate (fail_under in pyproject.toml; needs all extras)
+coverage:
+	@HF_HUB_OFFLINE=1 $(VENV)/bin/pytest tests/ --cov=$(PKG) --cov-report=term-missing
 
 ## Quick mock-only smoke check
 smoke:

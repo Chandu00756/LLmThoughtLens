@@ -1,4 +1,10 @@
-"""FeatureBrowser — a searchable HTML table of extracted features."""
+"""FeatureBrowser — a searchable HTML table of extracted features.
+
+The *Score* column is whatever the extractor ranked by — unitless for the
+default white-box ``scoring="centered"``.  When features carry the raw
+residual norm (``meta["raw_norm"]``) it is shown in its own *Raw ‖h‖*
+column so the two units are never mixed in one number.
+"""
 
 from __future__ import annotations
 
@@ -43,19 +49,26 @@ class FeatureBrowser:
     def to_html(self) -> str:
         rows = []
         max_score = max((abs(f.score) for f in self.features), default=1.0)
+        show_raw = any(_raw_norm(f) is not None for f in self.features)
         for f in self.features:
             bar_w = int(140 * abs(f.score) / (max_score + 1e-9))
+            raw = _raw_norm(f)
+            raw_attr = f' data-raw="{raw:.6f}"' if raw is not None else ""
+            raw_cell = (
+                (f"<td>{raw:.1f}</td>" if raw is not None else "<td>—</td>") if show_raw else ""
+            )
             rows.append(
                 f'<tr class="fb-row-{f.node_type}" data-label="{html.escape(f.label)}" '
                 f'data-layer="{f.layer}" data-token="{f.token_idx}" '
                 f'data-evidence="{f.evidence_kind}" '
-                f'data-score="{f.score:.6f}">'
+                f'data-score="{f.score:.6f}"{raw_attr}>'
                 f"<td>{f.id}</td>"
                 f"<td>{html.escape(f.label) or '<em>unlabelled</em>'}</td>"
                 f"<td>{f.layer}</td>"
                 f"<td>{f.token_idx}</td>"
                 f"<td>{f.score:.3f}</td>"
                 f'<td><span class="fb-bar" style="width:{bar_w}px"></span></td>'
+                f"{raw_cell}"
                 f"<td>{f.evidence_kind}</td>"
                 f"<td>{f.node_type}</td>"
                 f"</tr>"
@@ -70,9 +83,16 @@ class FeatureBrowser:
                 "<th data-key='label'>Label</th>"
                 "<th data-key='layer'>Layer</th>"
                 "<th data-key='token'>Token</th>"
-                "<th data-key='score'>Score</th>"
+                "<th data-key='score' title='"
+                + html.escape(_score_title(self.features), quote=True)
+                + "'>Score</th>"
                 "<th>Bar</th>"
-                "<th data-key='evidence'>Evidence</th>"
+                + (
+                    "<th data-key='raw' title='raw residual L2 norm of the site'>Raw ‖h‖</th>"
+                    if show_raw
+                    else ""
+                )
+                + "<th data-key='evidence'>Evidence</th>"
                 "<th data-key='type'>Node type</th>"
                 "</tr></thead>"
                 "<tbody>" + "\n".join(rows) + "</tbody></table>"
@@ -158,9 +178,11 @@ function tlsFeatureBrowser() {
       const tbody = tbl.querySelector('tbody');
       const sorted = rows.slice().sort((a, b) => {
         let av, bv;
-        if (key === 'score' || key === 'layer' || key === 'token') {
-          av = parseFloat(a.dataset[key === 'score' ? 'score' : key]);
-          bv = parseFloat(b.dataset[key === 'score' ? 'score' : key]);
+        if (key === 'score' || key === 'layer' || key === 'token' || key === 'raw') {
+          av = parseFloat(a.dataset[key]);
+          bv = parseFloat(b.dataset[key]);
+          if (isNaN(av)) av = -Infinity;
+          if (isNaN(bv)) bv = -Infinity;
         } else {
           av = a.dataset[key] || a.children[0].textContent;
           bv = b.dataset[key] || b.children[0].textContent;
@@ -174,3 +196,17 @@ function tlsFeatureBrowser() {
   });
 }
 """
+
+
+def _raw_norm(f: Feature) -> float | None:
+    raw = f.meta.get("raw_norm")
+    return float(raw) if isinstance(raw, (int, float)) else None
+
+
+def _score_title(features: list[Feature]) -> str:
+    methods = {f.meta.get("method") for f in features}
+    if methods == {"centered_norm"}:
+        return "unitless: distance from the layer's robust centre / layer median norm"
+    if methods == {"l2_norm"}:
+        return "raw residual L2 norm (legacy scoring='l2')"
+    return "extractor score"

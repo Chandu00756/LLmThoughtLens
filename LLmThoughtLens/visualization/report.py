@@ -3,7 +3,7 @@
 
 The five tabs (per the design document):
 
-1. **Token heatmap** — Plotly heatmap of per-token activation magnitudes.
+1. **Token heatmap** — Plotly heatmap of per-token feature evidence.
 2. **Attribution graph** — layered Plotly directed graph (real nodes + edges).
 3. **Residual stream** — PCA trajectory of selected tokens across layers.
 4. **Feature browser** — searchable / filterable HTML table.
@@ -11,6 +11,19 @@ The five tabs (per the design document):
 
 The whole document is a single ``.html`` file with zero external assets
 except a CDN-loaded ``plotly.min.js``.  Open it in any browser.
+
+The header carries honest caveats about how the numbers were produced: the
+white-box score scale (unitless centred score vs legacy raw L2 norm), any
+token positions the extractor left out of the ranking (attention-sink
+outliers), read from ``graph.meta["excluded_positions"]`` and feature meta,
+what the attribution edges mean (``graph.meta["edge_semantics"]``: causal
+linearised estimate / correlational / causal input masking), the
+real-ablation faithfulness check when it ran (Spearman, Pearson, ``n`` and
+sign agreement together, with a caveat), and SAE input caveats
+(``meta["sae_input_warning"]``).  The Attribution Graph tab opens with the
+same attribution summary.  Passing a
+:class:`~LLmThoughtLens.features.steering.SteeringResult` adds a Steering tab
+(baseline vs steered completion, per-step KL, token shifts).
 """
 
 from __future__ import annotations
@@ -22,11 +35,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from LLmThoughtLens.features.extractor import EXCLUSION_REASON_OUTLIER, exclusion_reasons
 from LLmThoughtLens.utils.colors import THOUGHTLENS_COLORS
+from LLmThoughtLens.visualization.attribution_view import (
+    attribution_html,
+    attribution_summary,
+    format_faithfulness,
+)
 from LLmThoughtLens.visualization.feature_browser import FeatureBrowser
 from LLmThoughtLens.visualization.graph_viz import GraphVisualizer
 from LLmThoughtLens.visualization.layer_stream import ResidualStreamView
 from LLmThoughtLens.visualization.probe_dashboard import ProbeDashboard
+from LLmThoughtLens.visualization.steering_view import SteeringView, steering_dict
 from LLmThoughtLens.visualization.token_heatmap import TokenHeatmap
 
 if TYPE_CHECKING:
@@ -97,6 +117,23 @@ header.tl-header .tl-evidence { display: inline-block; padding: 2px 8px; border-
   font-size: 0.75rem; }
 .tl-legend { font-size: 0.74rem; margin-top: 8px; opacity: 0.9; }
 .tl-legend b { font-weight: 700; }
+.tl-caveat { font-size: 0.74rem; margin-top: 6px; padding: 5px 9px; border-radius: 6px;
+  background: rgba(255,255,255,0.14); }
+.tl-caveat b { font-weight: 700; }
+.tl-method { font-size: 0.74rem; margin-top: 6px; padding: 5px 9px; border-radius: 6px;
+  background: rgba(255,255,255,0.10); border-left: 3px solid rgba(255,255,255,0.45); }
+.tl-method b { font-weight: 700; }
+.tl-attr { font-size: 0.85rem; margin-bottom: 12px; padding: 10px 12px; border-radius: 8px;
+  background: rgba(1,105,111,0.07); border: 1px solid rgba(1,105,111,0.18); }
+.tl-attr-row { margin: 3px 0; }
+.tl-faith { border-collapse: collapse; margin-top: 6px; font-size: 0.8rem; }
+.tl-faith th, .tl-faith td { padding: 2px 8px; border-bottom: 1px solid rgba(0,0,0,0.08); }
+.tl-steer-cols { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0; }
+.tl-steer-col { flex: 1 1 280px; min-width: 0; }
+.tl-steer-text { font-family: ui-monospace, Menlo, monospace; font-size: 0.85rem;
+  white-space: pre-wrap; padding: 8px 10px; border-radius: 6px; background: rgba(0,0,0,0.04); }
+.tl-diverge { background: rgba(209,153,0,0.35); border-radius: 3px; }
+.tl-steer-labels { font-size: 0.78rem; opacity: 0.85; }
 /* Dark mode: respects the OS setting, and a manual toggle via [data-theme]. */
 @media (prefers-color-scheme: dark) {
   html:not([data-theme="light"]) body { background: #15140f; color: #ece7da; }
@@ -163,6 +200,8 @@ class ReportBuilder:
         self.evidence_kind = evidence_kind
         self._tabs: list[ReportTab] = []
         self._extra_js: list[str] = []
+        self._caveats: list[str] = []
+        self._method_notes: list[str] = []
 
     def add_tab(self, tab_id: str, title: str, content: str, **meta: Any) -> ReportBuilder:
         self._tabs.append(ReportTab(tab_id=tab_id, title=title, content=content, meta=meta))
@@ -172,12 +211,48 @@ class ReportBuilder:
         self._extra_js.append(snippet)
         return self
 
+    def add_caveat(self, snippet: str) -> ReportBuilder:
+        """Add a header caveat line.  *snippet* is trusted HTML — escape user text first."""
+        self._caveats.append(snippet)
+        return self
+
+    def add_method_note(self, snippet: str) -> ReportBuilder:
+        """Add a header line about *how* the evidence was computed (attribution method,
+        edge semantics, faithfulness).  *snippet* is trusted HTML — escape user text first."""
+        self._method_notes.append(snippet)
+        return self
+
     def add_section(self, title: str, content: str, **meta: Any) -> ReportBuilder:
         return self.add_tab(title.lower().replace(" ", "_"), title, content, **meta)
 
     def add_graph_diff(self, diff: Any, title: str = "Graph Diff") -> ReportBuilder:
         """Embed a :class:`GraphDiff` rendering as a new tab in the report."""
         return self.add_tab("diff", title, diff.to_html(), diff_summary=diff.summary())
+
+    def add_steering(self, steering: Any, title: str = "Steering") -> ReportBuilder:
+        """Add a Steering tab for a :class:`SteeringResult` (or its ``to_dict()``)."""
+        try:
+            content = SteeringView(steering).to_html()
+        except Exception as exc:  # noqa: BLE001
+            content = f"<p>Steering view unavailable: {html.escape(repr(exc))}</p>"
+        return self.add_tab("steering", title, content)
+
+    @classmethod
+    def from_steering_result(cls, steering: Any) -> ReportBuilder:
+        """A one-tab report for a steering comparison (``LLmThoughtLens steer --report``)."""
+        data = steering_dict(steering)
+        vectors = data.get("vectors") or []
+        model = next((str(v["model_name"]) for v in vectors if v.get("model_name")), "")
+        builder = cls(
+            title="LLmThoughtLens — Steering Report",
+            model=model,
+            prompt=str(data.get("prompt", "")),
+            evidence_kind=str(data.get("evidence_kind", "white_box")),
+        )
+        if data.get("note"):
+            builder.add_caveat(f"<b>Steering evidence:</b> {html.escape(str(data['note']))}")
+        builder.add_steering(data)
+        return builder
 
     def render(self) -> str:
         if not self._tabs:
@@ -206,6 +281,8 @@ class ReportBuilder:
         generated = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         extra_js = "\n".join(self._extra_js)
         legend = _evidence_legend(self.evidence_kind)
+        caveats = "".join(f'<div class="tl-caveat">{c}</div>' for c in self._caveats)
+        method_notes = "".join(f'<div class="tl-method">{m}</div>' for m in self._method_notes)
 
         return (
             "<!DOCTYPE html>\n<html lang='en'>\n<head>\n"
@@ -218,6 +295,8 @@ class ReportBuilder:
             f"<h1>{html.escape(self.title)}</h1>"
             f'<div class="tl-sub">{sub} &middot; generated {generated}</div>'
             f'<div class="tl-legend">{legend}</div>'
+            f"{method_notes}"
+            f"{caveats}"
             "</header>\n"
             f'<div class="tl-tabbar">{tab_buttons}</div>\n'
             f"{panels}\n"
@@ -234,7 +313,8 @@ class ReportBuilder:
         Path(path).write_text(self.render(), encoding="utf-8")
 
     @classmethod
-    def from_trace_result(cls, result: TraceResult) -> ReportBuilder:
+    def from_trace_result(cls, result: TraceResult, steering: Any = None) -> ReportBuilder:
+        """The tabbed report for *result*; *steering* (a SteeringResult) adds a Steering tab."""
         evidence_kind = result.output.evidence_kind
         builder = cls(
             title="LLmThoughtLens — Interpretability Report",
@@ -243,24 +323,36 @@ class ReportBuilder:
             evidence_kind=evidence_kind,
         )
 
+        excluded_meta = result.graph.meta.get("excluded_positions")
+        exclusions = exclusion_reasons(result.features, excluded_meta)
+        for note in _attribution_notes(result):
+            builder.add_method_note(note)
+        for caveat in _trace_caveats(result, exclusions):
+            builder.add_caveat(caveat)
+
         # 1. Token heatmap
         try:
-            heatmap_html = TokenHeatmap(result.output, result.features).to_html()
+            heatmap_html = TokenHeatmap(
+                result.output, result.features, excluded_positions=excluded_meta
+            ).to_html()
         except Exception as exc:  # noqa: BLE001
             heatmap_html = f"<p>Token heatmap unavailable: {html.escape(repr(exc))}</p>"
         builder.add_tab("heatmap", "Token Heatmap", heatmap_html)
 
-        # 2. Attribution graph
+        # 2. Attribution graph (preceded by the method / semantics / faithfulness panel)
+        summary = attribution_summary(result.graph)
         try:
-            graph_html = GraphVisualizer(result.graph).to_html()
+            graph_html = GraphVisualizer(result.graph, excluded=exclusions).to_html()
         except Exception as exc:  # noqa: BLE001
             graph_html = f"<p>Attribution graph unavailable: {html.escape(repr(exc))}</p>"
-        builder.add_tab("graph", "Attribution Graph", graph_html)
+        builder.add_tab("graph", "Attribution Graph", attribution_html(summary) + graph_html)
 
         # 3. Residual stream
         if result.output.has_internals:
             try:
-                stream_html = ResidualStreamView(result.output).to_html()
+                stream_html = ResidualStreamView(
+                    result.output, exclude_positions=list(exclusions)
+                ).to_html()
             except Exception as exc:  # noqa: BLE001
                 stream_html = f"<p>Residual stream view unavailable: {html.escape(repr(exc))}</p>"
         else:
@@ -279,13 +371,20 @@ class ReportBuilder:
         probe_html = ProbeDashboard(result.probe_results).to_html()
         builder.add_tab("probes", "Probe Dashboard", probe_html)
 
+        # Optional: steering comparison
+        if steering is not None:
+            builder.add_steering(steering)
+
         # Optional 6th tab: raw JSON for inspection.
         raw = {
             "prompt": result.prompt,
             "output_token": result.output.output_token,
             "top_tokens": result.output.top_tokens,
             "evidence_kind": evidence_kind,
-            "features": [f.as_dict() for f in result.features[:30]],
+            "score_method": _score_method(result.features),
+            "excluded_positions": {str(p): r for p, r in exclusions.items()},
+            "attribution": summary,
+            "features": [{**f.as_dict(), "meta": f.meta} for f in result.features[:30]],
             "graph": result.graph.to_dict(),
             "probes": [p.as_dict() for p in result.probe_results],
         }
@@ -317,3 +416,94 @@ def _evidence_legend(evidence_kind: str) -> str:
         "<b>approximated</b> = estimated by input perturbation / token masking (black-box). "
         f"This trace is <b>{html.escape(evidence_kind)}</b> ({this})."
     )
+
+
+def _score_method(features: list[Any]) -> str:
+    """The extractor scoring method shared by *features* (``""`` when mixed / unknown)."""
+    methods = {f.meta.get("method") for f in features}
+    if len(methods) == 1:
+        method = next(iter(methods))
+        return method if isinstance(method, str) else ""
+    return ""
+
+
+def _attribution_notes(result: TraceResult) -> list[str]:
+    """Header method notes (trusted HTML): edge semantics, fallback, faithfulness."""
+    caveats: list[str] = []
+    summary = attribution_summary(result.graph)
+    if summary.get("edge_semantics"):
+        caveats.append(
+            f"<b>Attribution edges:</b> {html.escape(str(summary['semantics_label']))} — "
+            f"{html.escape(str(summary.get('semantics_explanation') or ''))}"
+        )
+    if summary.get("method_fallback"):
+        caveats.append(
+            "<b>Attribution fallback:</b> gradient attribution was not used — "
+            f"{html.escape(str(summary['method_fallback']))}"
+        )
+    faith = summary.get("faithfulness")
+    if faith:
+        caveats.append(
+            f"<b>Faithfulness (real ablations):</b> {html.escape(format_faithfulness(faith))}. "
+            f"{html.escape(str(faith.get('caveat', '')))}"
+        )
+    return caveats
+
+
+def _sae_caveats(result: TraceResult) -> list[str]:
+    """One caveat per distinct ``meta["sae_input_warning"]`` (e.g. SAELens BOS mismatch)."""
+    seen: list[str] = []
+    for f in result.features:
+        w = f.meta.get("sae_input_warning")
+        if isinstance(w, str) and w not in seen:
+            seen.append(w)
+    return [f"<b>SAE input:</b> {html.escape(w)}" for w in seen]
+
+
+def _trace_caveats(result: TraceResult, exclusions: dict[int, str]) -> list[str]:
+    """Header caveats (trusted HTML) describing the score scale and excluded positions."""
+    caveats: list[str] = _sae_caveats(result)
+    method = _score_method(result.features)
+    if method == "centered_norm":
+        caveats.append(
+            "<b>Score scale:</b> white-box feature scores are <b>unitless</b> — each site's "
+            "distance from its layer's robust centre divided by the layer's median token norm. "
+            "Raw residual norms are in the feature browser's <em>Raw ‖h‖</em> column and the "
+            "JSON <code>meta.raw_norm</code>."
+        )
+    elif method == "l2_norm":
+        caveats.append(
+            '<b>Score scale:</b> legacy <code>scoring="l2"</code> — feature scores are raw '
+            "residual L2 norms, which a massive-activation (attention-sink) position can dominate."
+        )
+    if not exclusions:
+        return caveats
+
+    tokens = result.output.tokens
+    stats = result.meta.get("outlier_stats") or {}
+    parts: list[str] = []
+    for pos, reason in exclusions.items():
+        tok = f" {html.escape(repr(tokens[pos]))}" if 0 <= pos < len(tokens) else ""
+        detail = ""
+        st = (stats.get(pos) or stats.get(str(pos))) if isinstance(stats, dict) else None
+        if reason == EXCLUSION_REASON_OUTLIER and isinstance(st, dict):
+            detail = (
+                f" — up to {float(st.get('max_ratio', 0.0)):.1f}x the other tokens' median norm "
+                f"in {100.0 * float(st.get('layer_frac', 0.0)):.0f}% of layers"
+            )
+        parts.append(f"position {pos}{tok}: {html.escape(reason)}{detail}")
+    line = (
+        "<b>Excluded from feature ranking:</b> "
+        + "; ".join(parts)
+        + ". These positions are left out of the per-layer statistics and shown greyed in the "
+        "token heatmap."
+    )
+    err = next((n for n in result.graph.nodes() if n.node_type == "error"), None)
+    frac = err.meta.get("excluded_energy_fraction") if err is not None else None
+    if isinstance(frac, (int, float)):
+        line += (
+            f" Their activation energy ({100.0 * float(frac):.1f}% of the total) is not counted "
+            "as unexplained in the error residual."
+        )
+    caveats.append(line)
+    return caveats

@@ -4,11 +4,19 @@ A supernode is a :class:`~LLmThoughtLens.features.feature.FeatureSet` of
 features whose activation directions are mutually close (cosine).  When an
 SAE is attached the grouper uses the SAE *decoder directions* directly,
 which gives much sharper, label-aligned clusters than raw activations.
+
+SAE features identify their dictionary entry through
+``meta["sae_feature_id"]`` (``Feature.id`` is unique per position and SAE,
+not the dictionary index).  With several SAEs pass ``sae`` as a mapping
+``{attachment name: sae}`` (``FeatureExtractor.sae_map``); features are
+matched through ``meta["sae_name"]``.  A single SAE paired with features from
+several SAEs is ambiguous, so the grouper then clusters by activation instead.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -26,7 +34,7 @@ class SupernodeGrouper:
     def __init__(
         self,
         similarity_threshold: float = 0.8,
-        sae: SparseAutoencoder | None = None,
+        sae: SparseAutoencoder | Mapping[str, SparseAutoencoder] | None = None,
     ) -> None:
         self.similarity_threshold = float(similarity_threshold)
         self.sae = sae
@@ -38,8 +46,8 @@ class SupernodeGrouper:
     ) -> list[FeatureSet]:
         if not features:
             return []
-        if self.sae is not None:
-            return self._group_by_sae_direction(features)
+        if self.sae is not None and (isinstance(self.sae, Mapping) or _single_source(features)):
+            return self._group_by_sae_direction(features, output.activations)
         if output.activations is not None:
             return self._group_by_activation(features, output.activations)
         return self._group_by_label(features)
@@ -48,10 +56,25 @@ class SupernodeGrouper:
     # SAE-direction clustering (sharpest grouping)
     # ------------------------------------------------------------------
 
-    def _group_by_sae_direction(self, features: list[Feature]) -> list[FeatureSet]:
+    def _group_by_sae_direction(
+        self, features: list[Feature], activations: np.ndarray | None = None
+    ) -> list[FeatureSet]:
         assert self.sae is not None
-        directions = {f.id: self.sae.feature_direction(f.id) for f in features}
-        return self._greedy_cluster(features, lambda f: directions[f.id])
+        directions = [self._direction(f, activations) for f in features]
+        index = {id(f): i for i, f in enumerate(features)}
+        return self._greedy_cluster(features, lambda f: directions[index[id(f)]])
+
+    def _direction(self, f: Feature, activations: np.ndarray | None) -> Any:
+        """Decoder direction of *f*, else its activation vector (else zeros)."""
+        fid = f.meta.get("sae_feature_id")
+        sae: Any = self.sae
+        if isinstance(sae, Mapping):
+            sae = sae.get(f.meta.get("sae_name")) if fid is not None else None
+        if sae is not None:
+            return sae.feature_direction(int(fid) if fid is not None else f.id)
+        if activations is not None and 0 <= f.layer < activations.shape[0]:
+            return activations[f.layer, f.token_idx]
+        return np.zeros(1)
 
     # ------------------------------------------------------------------
     # Activation clustering (white-box without SAE)
@@ -100,3 +123,9 @@ class SupernodeGrouper:
             fset.meta["representative_token"] = fset.representative_token()
             groups.append(fset)
         return groups
+
+
+def _single_source(features: list[Feature]) -> bool:
+    """True when every SAE feature comes from the same attached SAE (or none carry a name)."""
+    names = {f.meta.get("sae_name") for f in features if f.meta.get("sae_feature_id") is not None}
+    return len(names) <= 1

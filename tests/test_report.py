@@ -80,3 +80,22 @@ class TestReport:
             path = Path(td) / "report.html"
             builder.save(path)
             assert path.read_text().startswith("<!DOCTYPE html>")
+
+
+class TestReportScoreScale:
+    def test_report_states_centred_score_scale(self, trace_artefacts):
+        html = ReportBuilder.from_trace_result(trace_artefacts).render()
+        assert 'class="tl-caveat"' in html
+        assert "unitless" in html
+        # MockProvider has no attention sink, so nothing is reported as excluded.
+        assert "Excluded from feature ranking" not in html
+
+    def test_feature_browser_shows_raw_norm_beside_unitless_score(self, trace_artefacts):
+        html = FeatureBrowser(trace_artefacts.features).to_html()
+        assert "Raw ‖h‖" in html
+        assert html.count("data-raw=") == len(trace_artefacts.features)
+
+    def test_add_caveat_renders_in_header(self):
+        html = ReportBuilder(title="t").add_caveat("<b>note</b> x").render()
+        header = html.split("</header>")[0]
+        assert '<div class="tl-caveat"><b>note</b> x</div>' in header

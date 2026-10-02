@@ -56,6 +56,7 @@ dmypy.json
 report.html
 *_report.html
 benchmark_results.json
+/graphify-out/
 *.npz
 sae_*.pt
 acts.npz

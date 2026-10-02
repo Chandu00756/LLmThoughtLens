@@ -30,6 +30,8 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 requires-python = ">=3.10"
@@ -168,7 +170,10 @@ source = ["LLmThoughtLens"]
 omit = ["tests/*", "scripts/*", "examples/*"]
 
 [tool.coverage.report]
-fail_under = 70
+# Enforced by the CI "test" job, which installs every optional extra.
+# Local all-extras coverage is ~91%; a core-only install skips most of the
+# white-box / server code, so run the gate with all extras (``make coverage``).
+fail_under = 85
 show_missing = true
 exclude_lines = [
   "pragma: no cover",

@@ -1,4 +1,10 @@
-"""FastAPI application factory for the ThoughtLens live dashboard."""
+"""FastAPI application factory for the ThoughtLens live dashboard.
+
+Routers: provider config (``/api/config``), traces (``/api/trace``), steering
+(``/api/steer``), SAEs (``/api/sae``), benchmark records (``/api/bench``), the
+white-box stream and X-ray, ingest, and the provider-compatible proxy
+(``/v1``).  The dashboard itself is plain static JS (ADR-0004: no build step).
+"""
 
 from __future__ import annotations
 
@@ -11,9 +17,12 @@ from fastapi.staticfiles import StaticFiles
 
 from LLmThoughtLens import __version__
 from LLmThoughtLens.server import (
+    bench_api,
     config_api,
     ingest_api,
     proxy,
+    sae_api,
+    steer_api,
     trace_api,
     whitebox_stream,
     xray,
@@ -33,6 +42,9 @@ def create_app() -> FastAPI:
 
     app.include_router(config_api.build_router())
     app.include_router(trace_api.build_router())
+    app.include_router(steer_api.build_router())
+    app.include_router(sae_api.build_router())
+    app.include_router(bench_api.build_router())
     app.include_router(whitebox_stream.build_router())
     app.include_router(xray.build_router())
     app.include_router(ingest_api.build_router())

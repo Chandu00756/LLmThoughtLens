@@ -1,10 +1,12 @@
 """White-box "thinking stream" — live per-layer activations from a local HF model.
 
-Runs a real token-by-token greedy generation with ``output_hidden_states=True``
-and publishes, for every generated token, the per-layer L2 norm of the residual
-stream at the last position (the model's "thinking" as it unfolds).  After
-generation it runs a full :class:`Scope` trace and publishes the complete
-payload (features, attribution graph, residual-stream view data).
+Runs a real token-by-token greedy generation through the provider's
+:class:`~LLmThoughtLens.models.hooked.HookedModel` and publishes, for every
+generated token, the per-layer L2 norm of the residual stream (``resid_post``,
+the true pre-final-norm residual) at the last position — the model's
+"thinking" as it unfolds.  After generation it runs a full :class:`Scope`
+trace and publishes the complete payload (features, attribution graph,
+residual-stream view data).
 
 Everything here is real model computation — there is no synthetic data path.
 """
@@ -38,13 +40,11 @@ def _stream_whitebox(req: WhiteboxRequest) -> dict[str, Any]:
     provider = HuggingFaceProvider(
         model_name=req.model_name, device=req.device, capture_internals=True
     )
-    provider._load()  # noqa: SLF001 — within-package use of the lazy loader
-    model = provider._model  # noqa: SLF001
-    tokenizer = provider._tokenizer  # noqa: SLF001
-    device = provider._device  # noqa: SLF001
+    hm = provider.hooked  # loads the model on first use
+    tokenizer = hm.tokenizer
+    device = hm.device
 
-    enc = tokenizer(req.prompt, return_tensors="pt").to(device)
-    input_ids = enc["input_ids"]
+    input_ids = hm.tokenize(req.prompt).input_ids
     generated: list[int] = []
 
     bus.publish(
@@ -55,11 +55,11 @@ def _stream_whitebox(req: WhiteboxRequest) -> dict[str, Any]:
     eos_id = tokenizer.eos_token_id
     with torch.no_grad():
         for step in range(int(req.max_new_tokens)):
-            out = model(input_ids=input_ids, output_hidden_states=True, use_cache=False)
-            hidden_states = out.hidden_states[1:]  # drop embedding layer
+            res = hm.forward(input_ids, capture=True, capture_attentions=False)
             # Per-layer L2 norm of the LAST position = "what the model is building".
-            layer_norms = [float(hs[0, -1].to(torch.float32).norm().cpu()) for hs in hidden_states]
-            logits = out.logits[0, -1].to(torch.float32)
+            resid = res.resid("resid_post")  # (L, T, D) true residual, no final norm
+            layer_norms = resid[:, -1].to(torch.float32).norm(dim=-1).cpu().tolist()
+            logits = res.logits[0, -1].to(torch.float32)
             probs = torch.softmax(logits, dim=-1)
             top_p, top_i = torch.topk(probs, k=min(5, probs.shape[0]))
             next_id = int(top_i[0])
@@ -80,7 +80,8 @@ def _stream_whitebox(req: WhiteboxRequest) -> dict[str, Any]:
                 },
             )
             generated.append(next_id)
-            input_ids = torch.cat([input_ids, top_i[:1].view(1, 1)], dim=1)
+            nxt = top_i[:1].view(1, 1).to(device=input_ids.device, dtype=input_ids.dtype)
+            input_ids = torch.cat([input_ids, nxt], dim=1)
             if eos_id is not None and next_id == eos_id:
                 break
 

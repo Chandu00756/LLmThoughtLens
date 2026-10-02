@@ -259,3 +259,81 @@ class TestWebSocket:
                     break
             assert seen is not None
             assert seen["data"]["hello"] == "world"
+
+
+class TestProxyUpstreamResolution:
+    """``_resolve_upstream`` picks the OpenAI-compatible base URL for the proxy."""
+
+    @pytest.fixture
+    def capi(self, tmp_path, monkeypatch):
+        import LLmThoughtLens.server.config_api as capi
+
+        monkeypatch.setattr(capi, "SERVER_CONFIG_PATH", tmp_path / "server.json")
+        monkeypatch.delenv("LLMTHOUGHTLENS_OLLAMA_URL", raising=False)
+        return capi
+
+    def _save(self, capi, active: str, **ollama: str) -> None:
+        cfg = capi.ServerConfig(active_provider=active)
+        cfg.providers["ollama"].update(ollama)
+        capi.save_server_config(cfg)
+
+    def test_ollama_with_blank_base_url_uses_shared_default(self, capi):
+        from LLmThoughtLens.providers.defaults import DEFAULT_OLLAMA_URL
+        from LLmThoughtLens.server.proxy import _resolve_upstream
+
+        self._save(capi, "ollama", base_url="")
+        assert _resolve_upstream() == (f"{DEFAULT_OLLAMA_URL}/v1", "ollama")
+
+    def test_ollama_default_honours_env_override(self, capi, monkeypatch):
+        """Regression: the proxy hard-coded http://localhost:11434."""
+        from LLmThoughtLens.server.proxy import _resolve_upstream
+
+        self._save(capi, "ollama", base_url="   ")
+        monkeypatch.setenv("LLMTHOUGHTLENS_OLLAMA_URL", "http://gpu-box:11434/")
+        assert _resolve_upstream() == ("http://gpu-box:11434/v1", "ollama")
+
+    def test_configured_ollama_url_wins(self, capi, monkeypatch):
+        from LLmThoughtLens.server.proxy import _resolve_upstream
+
+        monkeypatch.setenv("LLMTHOUGHTLENS_OLLAMA_URL", "http://ignored:1")
+        self._save(capi, "ollama", base_url="http://box:9/")
+        assert _resolve_upstream()[0] == "http://box:9/v1"
+
+    def test_non_ollama_active_uses_openai(self, capi):
+        from LLmThoughtLens.server.proxy import _DEFAULT_OPENAI_BASE, _resolve_upstream
+
+        self._save(capi, "mock")
+        assert _resolve_upstream() == (_DEFAULT_OPENAI_BASE, "")
+
+
+class TestConfigAPIWithCorruptFile:
+    def test_get_config_survives_wrong_types(self, client, tmp_path):
+        (tmp_path / "server.json").write_text(
+            json.dumps(
+                {
+                    "top_k_features": "abc",
+                    "attribution_threshold": [1],
+                    "blackbox_budget": None,
+                    "active_provider": 5,
+                    "providers": {"openai": {"api_key": 99, "model": None}},
+                }
+            )
+        )
+        r = client.get("/api/config")
+        assert r.status_code == 200
+        body = r.json()
+        assert (body["top_k_features"], body["attribution_threshold"]) == (20, 0.05)
+        assert (body["blackbox_budget"], body["active_provider"]) == (16, "ollama")
+        assert body["providers"]["openai"]["api_key_set"] is False
+
+    def test_proxy_survives_wrong_types(self, client, tmp_path, monkeypatch):
+        """A non-string base_url used to crash the proxy with AttributeError (.strip)."""
+        from LLmThoughtLens.providers.defaults import DEFAULT_OLLAMA_URL
+        from LLmThoughtLens.server.proxy import _resolve_upstream
+
+        monkeypatch.delenv("LLMTHOUGHTLENS_OLLAMA_URL", raising=False)
+        (tmp_path / "server.json").write_text(  # the client fixture's config path
+            json.dumps({"providers": {"openai": {"base_url": 123, "api_key": ["k"]}}})
+        )
+        # Invalid openai fields fall back to "" -> default active provider (ollama).
+        assert _resolve_upstream() == (f"{DEFAULT_OLLAMA_URL}/v1", "ollama")

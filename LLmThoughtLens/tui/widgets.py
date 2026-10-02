@@ -67,7 +67,7 @@ class FuzzyList(Vertical):
         scored.sort(key=lambda t: -t[1])
         for it, score in scored:
             if score > 0 or not query:
-                listview.append(ListItem(Static(it)))
+                listview.append(_FuzzyItem(it))
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "fuzzy-input":
@@ -76,10 +76,39 @@ class FuzzyList(Vertical):
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         if event.item is None:
             return
-        first = event.item.children[0] if event.item.children else None
-        if isinstance(first, Static):
-            value = str(first.renderable)
-            self.post_message(self.Selected(value))
+        value = getattr(event.item, "value", None)
+        if not isinstance(value, str):  # a foreign ListItem — read its first Static
+            first = event.item.children[0] if event.item.children else None
+            if not isinstance(first, Static):
+                return
+            value = static_text(first)
+        self.post_message(self.Selected(value))
+
+
+class _FuzzyItem(ListItem):
+    """A list row that remembers the exact string it displays.
+
+    The item is rendered as plain :class:`~rich.text.Text` (never parsed as
+    console markup, so labels containing ``[`` render literally) and the
+    selection handler reads :attr:`value` instead of the Static's content.
+    """
+
+    def __init__(self, value: str) -> None:
+        super().__init__(Static(Text(value)))
+        self.value = value
+
+
+def static_text(widget: Static) -> str:
+    """Plain text shown by a :class:`Static`, across Textual versions.
+
+    Textual >= 2 exposes the content as ``Static.content``; older releases
+    used ``Static.renderable``.
+    """
+    for attr in ("content", "renderable"):
+        value = getattr(widget, attr, None)
+        if value is not None:
+            return value.plain if isinstance(value, Text) else str(value)
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -129,8 +158,10 @@ class ProbeProgress(Static):
     """A single-line probe status row used by the probe runner screen."""
 
     def __init__(self, name: str) -> None:
-        super().__init__()
-        self.name = name
+        # ``Widget.name`` is a read-only property in Textual — it must be set
+        # through the constructor, never assigned afterwards.
+        super().__init__(name=name)
+        self.probe_name = name
         self.state = "pending"
         self.score: float | None = None
 
@@ -147,7 +178,7 @@ class ProbeProgress(Static):
             mark = "·"
             style = "dim"
             tail = ""
-        return Text(f" {mark} {self.name:<26} {tail}", style=style)
+        return Text(f" {mark} {self.probe_name:<26} {tail}", style=style)
 
     def set_running(self) -> None:
         self.state = "running"

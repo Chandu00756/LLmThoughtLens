@@ -2,8 +2,9 @@
 
 The real logit-lens computation lives in ``xray_core`` (no web dependency) so
 the exact same loop powers both this endpoint and ``sdk.attach``.  This module
-just loads a model (by HF id *or local weights path*) and streams events to the
-:class:`EventBus`.
+just loads a model (by HF id *or local weights path*) through
+:class:`HuggingFaceProvider` (eager attention, :class:`HookedModel` residual
+capture) and streams events to the :class:`EventBus`.
 """
 
 from __future__ import annotations
@@ -39,15 +40,16 @@ def _stream_xray(req: XrayRequest) -> dict[str, Any]:
     provider = HuggingFaceProvider(
         model_name=req.model_name, device=req.device, capture_internals=True
     )
-    provider._load()  # noqa: SLF001 — lazy loader; accepts hub ids and local paths
+    hm = provider.hooked  # lazy load; accepts hub ids and local paths
     return run_xray_loop(
-        model=provider._model,  # noqa: SLF001
-        tokenizer=provider._tokenizer,  # noqa: SLF001
-        device=provider._device,  # noqa: SLF001
+        model=hm.model,
+        tokenizer=hm.tokenizer,
+        device=hm.device,
         prompt=req.prompt,
         max_new_tokens=req.max_new_tokens,
         emit=bus.publish,
         model_label=req.model_name,
+        hooked=hm,
     )
 
 

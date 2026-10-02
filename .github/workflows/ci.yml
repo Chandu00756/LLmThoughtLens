@@ -5,14 +5,26 @@ on:
     branches: ["main", "develop"]
   pull_request:
     branches: ["main"]
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# Cancel a run when a newer commit lands on the same PR / branch.  Runs on
+# main are never cancelled so every merged commit gets a complete result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
 
 jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +45,7 @@ jobs:
   typecheck:
     name: Type Check (mypy)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -40,12 +53,21 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: Install package with dev extras
-        run: pip install -e ".[dev]"
+      # mypy only checks calls into torch / transformers / fastapi / openai /
+      # anthropic when those packages are importable; without them every
+      # third-party symbol degrades to Any.  Install the same extras as the
+      # coverage job (CPU-only torch keeps the download small).
+      - name: Install CPU-only torch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install package with all extras
+        run: python -m pip install -e ".[dev,tui,server,openai,anthropic,huggingface]"
 
       - name: Run mypy
-        run: mypy LLmThoughtLens --ignore-missing-imports
+        run: mypy LLmThoughtLens
 
   security:
     name: Dependency Audit (pip-audit)
@@ -64,13 +86,25 @@ jobs:
       - name: Run pip-audit
         run: pip-audit --progress-spinner off || true
 
+  # The coverage gate.  Every optional extra is installed so the white-box
+  # (torch / transformers), server (fastapi), and remote-provider (openai /
+  # anthropic) code paths are actually exercised; fail_under lives in
+  # pyproject.toml ([tool.coverage.report]).
   test:
-    name: Tests (Python ${{ matrix.python-version }})
+    name: Tests + coverage (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    env:
+      # Tests must never fetch model weights.  Real-model tests load with
+      # local_files_only=True and skip when gpt2 is not cached; these make
+      # any accidental hub access fail fast instead of downloading.
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -79,16 +113,68 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
-      - name: Install package with dev extras
-        run: pip install -e ".[dev,tui]"
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
 
-      - name: Run pytest with coverage
-        run: pytest tests/ --tb=short -q --cov=LLmThoughtLens --cov-report=term-missing
+      # Install torch first from the CPU index so the extras install below
+      # sees it as satisfied and does not pull the multi-GB CUDA build.
+      - name: Install CPU-only torch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install package with all extras
+        run: python -m pip install -e ".[dev,tui,server,openai,anthropic,huggingface]"
+
+      - name: Show installed versions
+        run: python -m pip list
+
+      - name: Run pytest with coverage gate
+        run: >-
+          python -m pytest tests/
+          --cov=LLmThoughtLens
+          --cov-report=term-missing
+          --cov-report=xml
 
       - name: Upload coverage report
-        if: matrix.python-version == '3.11'
+        if: always() && matrix.python-version == '3.12'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: .coverage
+          path: coverage.xml
+          if-no-files-found: ignore
+
+  # Core-only install: proves the base package works without any optional
+  # extra and that every extra-dependent test skips cleanly instead of
+  # erroring.  No coverage gate here — most of the codebase is skipped.
+  test-minimal:
+    name: Tests, core deps only (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.14"]
+    env:
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      - name: Install package with dev extras only
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run pytest (no coverage gate)
+        run: python -m pytest tests/ --no-cov

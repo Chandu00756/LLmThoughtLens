@@ -30,6 +30,7 @@ import httpx
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import StreamingResponse
 
+from LLmThoughtLens.providers.defaults import default_ollama_url
 from LLmThoughtLens.server.bus import get_bus
 from LLmThoughtLens.server.config_api import load_server_config
 
@@ -41,7 +42,10 @@ def _resolve_upstream() -> tuple[str, str]:
 
     Uses the configured ``openai`` provider base_url/key; falls back to the
     public OpenAI endpoint.  If ``ollama`` is the active provider and no
-    OpenAI base is set, route to Ollama's OpenAI-compatible ``/v1``.
+    OpenAI base is set, route to Ollama's OpenAI-compatible ``/v1`` at the
+    configured Ollama base URL, else
+    :func:`~LLmThoughtLens.providers.defaults.default_ollama_url` (honours
+    ``LLMTHOUGHTLENS_OLLAMA_URL``).
     """
     cfg = load_server_config()
     openai = cfg.settings_for("openai")
@@ -50,7 +54,7 @@ def _resolve_upstream() -> tuple[str, str]:
     if not base:
         if cfg.active_provider == "ollama":
             ollama = cfg.settings_for("ollama")
-            ollama_base = (ollama.base_url or "http://localhost:11434").rstrip("/")
+            ollama_base = (ollama.base_url.strip() or default_ollama_url()).rstrip("/")
             base = f"{ollama_base}/v1"
             key = key or "ollama"  # Ollama ignores the key but the header is required
         else:

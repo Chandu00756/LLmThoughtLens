@@ -50,6 +50,9 @@ function dispatch(ev) {
     case "xray_step": stepXray(ev.data); break;
     case "xray_complete": finishXray(ev.data); break;
     case "xray_error": setBadges([{ t: "x-ray error: " + (ev.data.error || ""), c: "black_box" }]); break;
+    case "steer_started": setBadges([{ t: "steering…", c: "white_box" }], true); break;
+    case "steer_complete": renderSteer(ev.data); break;
+    case "steer_error": renderSteerError(ev.data.error || "steering failed"); break;
   }
 }
 
@@ -89,22 +92,53 @@ function stepXray(d) {
     xrayPrev[entry.layer] = top[0];
   });
 
-  // Activation grid heatmap (layers × tokens)
+  // Activation grid heatmap (layers × tokens). Raw ‖h‖: cap the colour scale
+  // at the largest non-sink cell so an attention-sink column cannot flatten
+  // every other token into one colour (its hover keeps the true value).
+  // Numeric x (token index) + tick labels: Plotly merges categorical axes, so
+  // a repeated token (e.g. " the" twice) would otherwise share one column.
+  const cap = sinkCap(d.grid);
+  const toks = d.tokens || [];
+  const idx = toks.map((_, i) => i);
+  const tokAxis = { tickmode: "array", tickvals: idx, ticktext: toks.map(String) };
   Plotly.react("xray-grid-plot", [{
-    z: d.grid, x: d.tokens, y: d.grid.map((_, i) => "L" + i), type: "heatmap",
+    z: d.grid, x: idx, y: d.grid.map((_, i) => "L" + i), type: "heatmap",
     colorscale: [[0, "#0d1b1c"], [0.5, COLORS.accentDeep], [1, COLORS.gold]],
-    hovertemplate: "layer %{y}, %{x}: ‖h‖=%{z:.1f}<extra></extra>",
-  }], plotLayout({ height: 280, margin: { t: 10, b: 60, l: 40, r: 10 } }), { displayModeBar: false, responsive: true });
+    zmin: cap.zmin, zmax: cap.zmax,
+    text: d.grid.map((row) => row.map((_, t) => escapeHtml(toks[t] !== undefined ? toks[t] : "tok" + t) + (cap.sinks.has(t) ? "<br>attention-sink outlier — colour capped" : ""))),
+    hovertemplate: "layer %{y}, token %{x} %{text}: ‖h‖=%{z:.1f}<extra></extra>",
+  }], plotLayout({ height: 280, margin: { t: 10, b: 60, l: 40, r: 10 }, xaxis: tokAxis }), { displayModeBar: false, responsive: true });
 
   // Attention heatmap (last layer)
   if (d.attention && d.attention.length) {
+    const n = d.attention.length, aIdx = [...Array(n).keys()];
+    const lab = (i) => escapeHtml(toks[i] !== undefined ? toks[i] : "tok" + i);
     Plotly.react("xray-attn-plot", [{
-      z: d.attention, x: d.tokens, y: d.tokens, type: "heatmap",
+      z: d.attention, x: aIdx, y: aIdx, type: "heatmap",
       colorscale: [[0, "#0d1b1c"], [1, COLORS.accent]],
-      hovertemplate: "%{y} → %{x}: %{z:.3f}<extra></extra>",
-    }], plotLayout({ height: 280, margin: { t: 10, b: 60, l: 60, r: 10 } }), { displayModeBar: false, responsive: true });
+      text: d.attention.map((row, i) => row.map((_, j) => `${i}:${lab(i)} → ${j}:${lab(j)}`)),
+      hovertemplate: "%{text}: %{z:.3f}<extra></extra>",
+    }], plotLayout({
+      height: 280, margin: { t: 10, b: 60, l: 60, r: 10 },
+      xaxis: { tickmode: "array", tickvals: aIdx, ticktext: aIdx.map((i) => String(toks[i] !== undefined ? toks[i] : i)) },
+      yaxis: { tickmode: "array", tickvals: aIdx, ticktext: aIdx.map((i) => String(toks[i] !== undefined ? toks[i] : i)), autorange: "reversed" },
+    }), { displayModeBar: false, responsive: true });
   }
   setBadges([{ t: "x-ray step " + d.step, c: "white_box" }, { t: "→ " + d.token, c: "out" }], true);
+}
+// Columns whose ‖h‖ exceeds 6× the other tokens' median in ≥30% of layers
+// (the extractor's massive-activation rule) → excluded from the colour range.
+function sinkCap(grid) {
+  const none = { zmin: undefined, zmax: undefined, sinks: new Set() };
+  const L = grid.length, T = L ? grid[0].length : 0;
+  if (!L || T < 2) return none;
+  const median = (a) => { const s = a.slice().sort((x, y) => x - y), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+  const hits = new Array(T).fill(0);
+  grid.forEach((row) => row.forEach((v, t) => { const ref = median(row.filter((_, j) => j !== t)); if (ref > 0 && v > 6 * ref) hits[t]++; }));
+  const sinks = new Set(hits.map((c, t) => (c >= 0.3 * L ? t : -1)).filter((t) => t >= 0));
+  if (!sinks.size || sinks.size === T) return none;
+  const rest = grid.flatMap((row) => row.filter((_, t) => !sinks.has(t)));
+  return { zmin: Math.min(...rest), zmax: Math.max(...rest), sinks };
 }
 function finishXray(d) {
   setBadges([{ t: "x-ray complete", c: "white_box" }, { t: "answer: " + (d.completion || "").slice(0, 50), c: "out" }]);
@@ -165,7 +199,8 @@ function renderTrace(p) {
     { t: ev || "—", c: ev },
     { t: (p.model || p.provider || "model"), c: "" },
     { t: (p.features ? p.features.length : 0) + " features", c: "" },
-  ]);
+  ].concat(attributionBadges(p)));
+  renderAttribution(p);
   renderHeatmap(p);
   renderGraph(p);
   renderFeatures(p);
@@ -183,22 +218,93 @@ function plotLayout(extra) {
   }, extra || {});
 }
 
+// Positions the extractor left out of the feature ranking (attention sinks).
+function excludedOf(p) {
+  const meta = (p.graph && p.graph.meta) || {};
+  return new Set((p.excluded_positions || meta.excluded_positions || []).map(Number));
+}
+
 function renderHeatmap(p) {
   const feats = p.features || [];
   if (!feats.length) return;
   $("heatmap-empty").style.display = "none";
-  const tokens = (p.summary && p.summary.tokens) || [];
+  // input_tokens = what feature.token_idx indexes (summary.tokens is the completion for API models).
+  const tokens = p.input_tokens || (p.summary && p.summary.tokens) || [];
+  const excluded = excludedOf(p), reasons = p.exclusion_reasons || {};
+  // Colour = Σ feature score per token only (never raw activation norms);
+  // excluded positions are greyed with a hover note, not silently hot or zero.
   const agg = {};
-  for (const f of feats) agg[f.token_idx] = (agg[f.token_idx] || 0) + Math.max(0, f.score);
-  const n = Math.max(tokens.length, Object.keys(agg).length);
-  const labels = [], z = [];
-  for (let i = 0; i < n; i++) { labels.push(tokens[i] || ("tok" + i)); z.push(agg[i] || 0); }
-  const max = Math.max(...z, 1e-9);
-  Plotly.react("heatmap-plot", [{
-    z: [z.map((v) => v / max)], x: labels, y: ["activation"], type: "heatmap",
-    colorscale: [[0, "#0d1b1c"], [0.5, COLORS.accentDeep], [1, COLORS.gold]],
-    xgap: 2, hovertemplate: "%{x}: %{z:.3f}<extra></extra>",
-  }], plotLayout({ height: 200, title: "Per-token activation (real)" }), { displayModeBar: false, responsive: true });
+  for (const f of feats) if (!excluded.has(f.token_idx)) agg[f.token_idx] = (agg[f.token_idx] || 0) + Math.max(0, f.score);
+  const n = Math.max(tokens.length, ...Object.keys(agg).map((k) => +k + 1));
+  const max = Math.max(1e-9, ...Object.values(agg));
+  const xs = [], labels = [], z = [], zEx = [], hover = [];
+  for (let i = 0; i < n; i++) {
+    const label = tokens[i] !== undefined ? tokens[i] : "tok" + i;
+    xs.push(i); labels.push(label);
+    const ex = excluded.has(i);
+    z.push(ex ? null : (agg[i] || 0) / max); zEx.push(ex ? 1 : null);
+    hover.push(ex ? `${escapeHtml(label)}<br>excluded: ${escapeHtml(reasons[i] || "left out of feature ranking")}`
+      : `${escapeHtml(label)}: Σ feature score ${(agg[i] || 0).toFixed(3)}`);
+  }
+  const cell = { x: xs, y: ["evidence"], type: "heatmap", zmin: 0, zmax: 1, xgap: 2, text: [hover], hovertemplate: "%{text}<extra></extra>", hoverongaps: false };
+  const traces = [Object.assign({ z: [z], colorscale: [[0, "#0d1b1c"], [0.5, COLORS.accentDeep], [1, COLORS.gold]] }, cell)];
+  if (excluded.size) traces.push(Object.assign({ z: [zEx], colorscale: [[0, COLORS.muted], [1, COLORS.muted]], showscale: false }, cell));
+  Plotly.react("heatmap-plot", traces, plotLayout({
+    height: 200, title: "Per-token feature evidence (Σ feature score" + (excluded.size ? "; grey = excluded attention sink" : "") + ")",
+    xaxis: { tickmode: "array", tickvals: xs, ticktext: labels },
+  }), { displayModeBar: false, responsive: true });
+}
+
+/* ---------------- Attribution method + faithfulness ---------------- */
+const SEMANTICS = {
+  causal_linearised: { label: "causal · linearised estimate", c: "white_box" },
+  correlational: { label: "correlational (not causal)", c: "" },
+  causal_input_masking: { label: "causal · input masking", c: "black_box" },
+};
+const FAITH_CAVEAT = "Predicted = linearised (gradient × activation) estimate; measured = real ablation. "
+  + "Nonlinear components (e.g. GPT-2's large layer-0 writes) can make them disagree, so read all four numbers together.";
+function fmtCorr(v) { return v === null || v === undefined || !isFinite(v) ? "undefined" : (v >= 0 ? "+" : "") + (+v).toFixed(2); }
+function faithText(f) {
+  const sign = f.sign_agreement === null || f.sign_agreement === undefined ? "undefined" : Math.round(100 * f.sign_agreement) + "%";
+  return `Spearman ${fmtCorr(f.spearman)} · Pearson ${fmtCorr(f.pearson)} · n=${f.n} · sign agreement ${sign}`;
+}
+function attributionBadges(p) {
+  const a = p.attribution || {};
+  const out = [];
+  if (a.edge_semantics) {
+    const s = SEMANTICS[a.edge_semantics] || { label: a.edge_semantics, c: "" };
+    out.push({ t: "edges: " + s.label, c: s.c });
+  }
+  if (a.faithfulness) out.push({ t: "faithfulness: " + faithText(a.faithfulness), c: "" });
+  return out;
+}
+function renderAttribution(p) {
+  const box = $("graph-attr"); if (!box) return;
+  const a = p.attribution || {};
+  if (!a.edge_semantics) { box.style.display = "none"; return; }
+  const s = SEMANTICS[a.edge_semantics] || { label: a.edge_semantics, c: "" };
+  const rows = [`<span class="badge ${s.c}">edges: ${escapeHtml(s.label)}</span> `
+    + `<span class="muted">method ${escapeHtml(a.method || "?")}`
+    + (a.metric ? ` · metric ${escapeHtml(a.metric)}` + (a.target_token !== null && a.target_token !== undefined ? ` of ${escapeHtml(JSON.stringify(a.target_token))}` : "") : "")
+    + "</span>"];
+  if (a.semantics_explanation) rows.push(`<div class="note">${escapeHtml(a.semantics_explanation)}</div>`);
+  if (a.method_fallback) rows.push(`<div class="note"><b>Fallback:</b> gradient attribution not used — ${escapeHtml(a.method_fallback)}</div>`);
+  if (typeof a.unexplained_fraction === "number") {
+    rows.push(`<div class="note"><b>Error node:</b> ${(100 * a.unexplained_fraction).toFixed(1)}% `
+      + (a.error_kind === "attribution_mass" ? "of attribution mass not covered by the graph's nodes." : "of residual activation energy not covered by the graph's nodes.") + "</div>");
+  }
+  if (a.faithfulness) {
+    rows.push(`<div><span class="badge faith">faithfulness: ${escapeHtml(faithText(a.faithfulness))}</span></div>`);
+    rows.push(`<div class="note">${escapeHtml(a.faithfulness.caveat || FAITH_CAVEAT)}</div>`);
+  } else if (a.faithfulness_skipped) {
+    rows.push(`<div class="note"><b>Faithfulness:</b> not computed — ${escapeHtml(a.faithfulness_skipped)}</div>`);
+  } else if (a.edge_semantics === "causal_linearised") {
+    rows.push('<div class="note"><b>Faithfulness:</b> not validated — set “Validate (k ablations)” to compare the estimates with real ablations.</div>');
+  }
+  (p.sae_warnings || []).forEach((w) => rows.push(`<div class="note"><b>SAE input:</b> ${escapeHtml(w)}</div>`));
+  (p.notes || []).forEach((w) => rows.push(`<div class="note"><b>Note:</b> ${escapeHtml(w)}</div>`));
+  box.innerHTML = rows.join("");
+  box.style.display = "block";
 }
 
 function renderGraph(p) {
@@ -222,15 +328,28 @@ function renderGraph(p) {
       posOf[m.id] = [parseFloat(x), y];
     });
   });
-  // Only label the most important nodes (+ every output/error/supernode) so the
-  // left column of input tokens doesn't become an unreadable stack.
-  const ranked = g.nodes.slice().sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
-  const labelSet = new Set(ranked.slice(0, 12).map((n) => n.id));
+  // Only label the most important nodes so the left column of input tokens
+  // doesn't become an unreadable stack. Scores are NOT comparable across node
+  // types (input tokens are fixed at 1.0, features are unitless centred scores,
+  // the error node is raw residual energy ~1e6), so rank within a type: every
+  // output/error/supernode, then the top features by |score|, then the input
+  // tokens that feed a labelled node (by |edge weight|) or host a labelled feature.
+  const labelSet = new Set(), internal = [];
   g.nodes.forEach((n) => {
-    if (n.node_type === "output_token" || n.node_type === "error" || n.node_type === "supernode") {
-      labelSet.add(n.id);
-    }
+    if (n.node_type === "output_token" || n.node_type === "error" || n.node_type === "supernode") labelSet.add(n.id);
+    else if (n.node_type !== "input_token") internal.push(n);
   });
+  const topFeats = internal.sort((a, b) => Math.abs(b.score) - Math.abs(a.score)).slice(0, 10);
+  topFeats.forEach((n) => labelSet.add(n.id));
+  const hostTok = new Set(topFeats.map((n) => n.token_idx)), flow = {};
+  (g.edges || []).forEach((e) => {
+    const s = byId[e.src];
+    if (s && s.node_type === "input_token" && labelSet.has(e.dst)) flow[e.src] = (flow[e.src] || 0) + Math.abs(e.weight);
+  });
+  g.nodes.filter((n) => n.node_type === "input_token" && (flow[n.id] || hostTok.has(n.token_idx)))
+    .sort((a, b) => (flow[b.id] || 0) - (flow[a.id] || 0) || a.token_idx - b.token_idx)
+    .slice(0, 6).forEach((n) => labelSet.add(n.id));
+  const excluded = excludedOf(p);
   const promoteX = [], promoteY = [], supX = [], supY = [];
   (g.edges || []).forEach((e) => {
     const a = posOf[e.src], b = posOf[e.dst]; if (!a || !b) return;
@@ -251,15 +370,35 @@ function renderGraph(p) {
       mode: "markers+text",
       text: members.map((n) => (labelSet.has(n.id) ? (n.label || n.id) : "")),
       textposition: "middle right", textfont: { size: 10 }, name: t,
-      marker: { size: 13, color: typeColor[t] || COLORS.muted, line: { width: 1, color: "#0008" } },
-      hovertext: members.map((n) => `${n.label}<br>${n.node_type} · layer ${n.layer} · score ${(+n.score).toFixed(3)}`),
+      // Fixed size + per-type colour: never scale markers by score across types.
+      marker: {
+        size: 13, line: { width: 1, color: "#0008" },
+        color: t === "input_token" ? members.map((n) => (excluded.has(n.token_idx) ? COLORS.muted : COLORS.input)) : (typeColor[t] || COLORS.muted),
+      },
+      hovertext: members.map((n) => `${escapeHtml(n.label)}<br>${n.node_type} · layer ${n.layer} · `
+        + (n.node_type === "error"
+          ? (n.error_kind === "attribution_mass"
+            ? `uncovered attribution mass ${(+n.score).toPrecision(3)} (metric units)`
+            : `residual energy ${(+n.score).toExponential(2)}`)
+            + (n.unexplained_fraction !== undefined ? ` · unexplained ${(100 * n.unexplained_fraction).toFixed(1)}%` : "")
+          : `score ${(+n.score).toFixed(3)}`
+            + (typeof n.attribution === "number" ? `<br>attribution ${(n.attribution >= 0 ? "+" : "") + n.attribution.toPrecision(3)}` : "")
+            + (typeof n.patched_effect === "number" ? `<br>measured ablation effect ${(n.patched_effect >= 0 ? "+" : "") + n.patched_effect.toPrecision(3)}` : "")
+            + (n.selected_by === "attribution" ? "<br>added by attribution (not an extracted feature)" : ""))
+        + (n.node_type === "input_token" && excluded.has(n.token_idx)
+          ? "<br>excluded: " + escapeHtml((p.exclusion_reasons || {})[n.token_idx] || "left out of feature ranking") : "")),
       hoverinfo: "text",
     });
   });
   const blackbox = (p.evidence_kind || "") === "black_box";
-  const title = blackbox
-    ? "Input→output attribution (API model — internals not observable; use 🔬 X-ray on a local model)"
-    : "Attribution graph (real causal flow)";
+  const sem = (p.attribution && p.attribution.edge_semantics) || (g.meta && g.meta.edge_semantics) || "";
+  const title = blackbox || sem === "causal_input_masking"
+    ? "Input→output attribution — causal input masking (API model: internals not observable; use 🔬 X-ray on a local model)"
+    : sem === "causal_linearised"
+      ? "Attribution graph — causal, linearised estimate (gradient × activation)"
+      : sem === "correlational"
+        ? "Attribution graph — correlational (activation flow, not causal)"
+        : "Attribution graph";
   Plotly.react("graph-plot", traces, plotLayout({
     height: 480, title: { text: title, font: { size: 13 } }, showlegend: true,
     xaxis: { visible: false }, yaxis: { visible: false, range: [-6, 6] },
@@ -371,7 +510,8 @@ function applyProviderFields() {
       + "never layer activations — so it can't be X-rayed. Load the same weights as HuggingFace to open them up.",
     huggingface: "Local, white-box. Model box accepts a HF id (gpt2) OR a local weights folder/path "
       + "(safetensors/PyTorch). Full X-ray: real activations, attention, logit lens. (GGUF-only weights need conversion.)",
-    openai: "Black-box. Uses real logprobs for attribution.",
+    openai: "Black-box. Uses real logprobs for attribution (chat models). Reasoning models (o1/o3/o4, gpt-5 family) return no logprobs: "
+      + "their top-token probability is a 1.0 placeholder and attribution is coarse.",
     anthropic: "Black-box. No token logprobs — attribution via sampled token + masking.",
     mock: "Offline synthetic provider for demos and tests.",
   };
@@ -408,15 +548,199 @@ async function saveDefaults() {
 }
 
 /* ---------------- Actions ---------------- */
+function traceOptions() {
+  const num = (id, dflt) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) && v >= 0 ? v : dflt; };
+  return {
+    attribution: $("attr-method").value,
+    metric: $("attr-metric").value,
+    scoring: $("attr-scoring").value,
+    validate: num("attr-validate", 0),
+    attribution_nodes: num("attr-nodes", 10),
+  };
+}
+function saveTraceOptions() {
+  try { localStorage.setItem("tl-trace-options", JSON.stringify(traceOptions())); } catch (e) { /* storage unavailable */ }
+}
+function restoreTraceOptions() {
+  let o = null;
+  try { o = JSON.parse(localStorage.getItem("tl-trace-options") || "null"); } catch (e) { o = null; }
+  if (!o) return;
+  if (o.attribution) $("attr-method").value = o.attribution;
+  if (o.metric) $("attr-metric").value = o.metric;
+  if (o.scoring) $("attr-scoring").value = o.scoring;
+  if (o.validate !== undefined) $("attr-validate").value = o.validate;
+  if (o.attribution_nodes !== undefined) $("attr-nodes").value = o.attribution_nodes;
+}
+function errorText(data) {
+  if (!data) return "request failed";
+  if (data.error) return data.error;
+  if (Array.isArray(data.detail)) return data.detail.map((d) => (d.loc || []).slice(-1)[0] + ": " + d.msg).join("; ");
+  return data.detail ? String(data.detail) : "request failed";
+}
 async function runTrace() {
   const prompt = $("prompt-input").value.trim(); if (!prompt) return;
   setBadges([{ t: "tracing…", c: "" }], true);
+  saveTraceOptions();
   const res = await fetch("/api/trace", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, provider: $("provider-select").value, run_probes: false }),
+    body: JSON.stringify(Object.assign({ prompt, provider: $("provider-select").value, run_probes: false }, traceOptions())),
   });
   const data = await res.json();
-  if (data.error) setBadges([{ t: "error: " + data.error, c: "black_box" }]);
+  if (!res.ok || data.error) setBadges([{ t: "error: " + errorText(data), c: "black_box" }]);
+}
+
+/* ---------------- SAE picker ---------------- */
+function renderSaeState(st) {
+  const sel = $("sae-release");
+  if (st.releases && !sel.options.length) {
+    Object.entries(st.releases).forEach(([name, info]) => {
+      const o = document.createElement("option");
+      o.value = name; o.textContent = `${name} (${info.model})`; o.dataset.example = info.example_sae_id;
+      sel.appendChild(o);
+    });
+    if (sel.options.length && !$("sae-id").value) $("sae-id").placeholder = sel.options[0].dataset.example || "";
+  }
+  const active = st.active || [];
+  const loaded = (st.loaded || []).filter((l) => active.includes(l.key));
+  $("sae-status").innerHTML = active.length
+    ? "Attached to HuggingFace traces: " + loaded.map((l) => `<b>${escapeHtml(l.key)}</b> (${escapeHtml(l.hook_name || "")}, ${l.d_sae} features`
+      + (l.hf_model ? `, trained on ${escapeHtml(l.hf_model)}` : "") + ")").join(", ")
+    : "No SAE attached — traces use residual-site features.";
+}
+async function loadSaeState() {
+  try { renderSaeState(await (await fetch("/api/sae")).json()); } catch (e) { /* server without the SAE API */ }
+}
+async function loadSae() {
+  const release = $("sae-release").value, saeId = $("sae-id").value.trim() || $("sae-id").placeholder;
+  if (!release || !saeId) return;
+  $("sae-status").innerHTML = '<span class="spinner"></span> loading SAE…';
+  const res = await fetch("/api/sae/load", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ release, sae_id: saeId, allow_download: $("sae-download").checked, attach: true }),
+  });
+  const data = await res.json();
+  if (!res.ok || data.error) { $("sae-status").textContent = "✗ " + errorText(data); return; }
+  renderSaeState(data);
+}
+async function detachSae() {
+  renderSaeState(await (await fetch("/api/sae/detach", { method: "POST" })).json());
+}
+
+/* ---------------- Steering ---------------- */
+async function runSteer() {
+  const prompt = $("prompt-input").value.trim(); if (!prompt) return;
+  const lines = (id) => $(id).value.split("\n").map((x) => x.trim()).filter(Boolean);
+  const provider = $("provider-select").value;
+  const body = {
+    prompt, provider,
+    positive: lines("steer-pos"), negative: lines("steer-neg"),
+    layer: parseInt($("steer-layer").value, 10), coeff: parseFloat($("steer-coeff").value),
+    site: $("steer-site").value, positions: $("steer-positions").value,
+    max_new_tokens: parseInt($("steer-tokens").value, 10) || 20,
+  };
+  if (provider === "huggingface" && $("model-input").value) body.model_name = $("model-input").value;
+  switchTab("steering");
+  $("steer-out").innerHTML = '<div class="center-empty"><span class="spinner"></span> generating baseline and steered completions…</div>';
+  const res = await fetch("/api/steer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok || data.error) renderSteerError(errorText(data));
+}
+function renderSteerError(msg) {
+  $("steer-out").innerHTML = `<div class="xray-banner">⚠️ ${escapeHtml(msg)}</div>`;
+  setBadges([{ t: "steering error", c: "black_box" }]);
+}
+function tokenSpans(trace, diverged) {
+  return (trace.tokens || []).map((t, i) => `<span class="${i === diverged ? "diverge" : ""}">${escapeHtml(t)}</span>`).join("");
+}
+function shiftRows(rows) {
+  return (rows || []).slice(0, 6).map((r) => `<tr><td><code>${escapeHtml(JSON.stringify(r.token))}</code></td>`
+    + `<td>${(+r.p_baseline).toFixed(4)}</td><td>${(+r.p_steered).toFixed(4)}</td></tr>`).join("") || '<tr><td colspan="3">—</td></tr>';
+}
+function renderSteer(d) {
+  switchTab("steering");
+  const v = d.vector || (d.vectors && d.vectors[0]) || {};
+  const div = d.diverged_at === null || d.diverged_at === undefined ? null : d.diverged_at;
+  $("steer-out").innerHTML = `
+    <div class="badges" style="margin:10px 0">
+      <span class="badge white_box">${escapeHtml(d.evidence_kind || "white_box")}</span>
+      <span class="badge">${escapeHtml(d.method || "")}</span>
+      <span class="badge">effect: ${escapeHtml(d.effect_semantics || "")}</span>
+      <span class="badge">${escapeHtml(d.model || "")} · layer ${v.layer} ${escapeHtml(v.site || "")} · coeff ${(d.vectors && d.vectors[0] ? d.vectors[0].coeff : v.coeff)}</span>
+    </div>
+    <div class="note">${escapeHtml(d.note || "")}</div>
+    <div class="steer-cols">
+      <div class="steer-col"><h4 class="xray-h">Baseline</h4><div class="steer-text">${tokenSpans(d.baseline || {}, div)}</div></div>
+      <div class="steer-col"><h4 class="xray-h">Steered</h4><div class="steer-text">${tokenSpans(d.steered || {}, div)}</div></div>
+    </div>
+    <div class="note">KL first step ${(+d.first_step_kl).toFixed(4)} nats · mean ${(+d.mean_kl).toFixed(4)} nats · `
+      + (div === null ? "identical completions" : `first differs at generated token ${div}`)
+      + ` · KL is teacher-forced along the baseline completion.</div>
+    <div id="steer-kl-plot"></div>
+    <div class="steer-cols">
+      <div class="steer-col"><h4 class="xray-h">Promoted (first step)</h4><table class="ftable"><thead><tr><th>token</th><th>p base</th><th>p steered</th></tr></thead><tbody>${shiftRows(d.promoted)}</tbody></table></div>
+      <div class="steer-col"><h4 class="xray-h">Suppressed (first step)</h4><table class="ftable"><thead><tr><th>token</th><th>p base</th><th>p steered</th></tr></thead><tbody>${shiftRows(d.suppressed)}</tbody></table></div>
+    </div>`;
+  const kl = d.kl_per_step || [], toks = (d.baseline && d.baseline.tokens) || [];
+  const xs = kl.map((_, i) => i);
+  Plotly.react("steer-kl-plot", [{
+    x: xs, y: kl, type: "bar", marker: { color: COLORS.accent },
+    text: xs.map((i) => escapeHtml(toks[i] !== undefined ? toks[i] : "")),
+    hovertemplate: "step %{x} (%{text}): KL %{y:.4f} nats<extra></extra>",
+  }], plotLayout({
+    height: 240, title: { text: "KL(steered ‖ baseline) per step", font: { size: 12 } },
+    xaxis: { tickmode: "array", tickvals: xs, ticktext: xs.map((i) => String(toks[i] !== undefined ? toks[i] : i)) },
+    yaxis: { title: "nats" },
+  }), { displayModeBar: false, responsive: true });
+  setBadges([{ t: "steering complete", c: "white_box" }, { t: "mean KL " + (+d.mean_kl).toFixed(3), c: "out" }]);
+}
+
+/* ---------------- Benchmarks ---------------- */
+async function loadBenchList() {
+  try {
+    const data = await (await fetch("/api/bench/results")).json();
+    const sel = $("bench-list");
+    sel.innerHTML = '<option value="">— records in ' + escapeHtml(data.dir || "the bench folder") + " —</option>";
+    (data.results || []).forEach((r) => {
+      const o = document.createElement("option"); o.value = r.name; o.textContent = r.name; sel.appendChild(o);
+    });
+  } catch (e) { /* server without the bench API */ }
+}
+async function viewBenchByName(name) {
+  if (!name) return;
+  const res = await fetch("/api/bench/results/" + encodeURIComponent(name).replace(/%2F/g, "/"));
+  const data = await res.json();
+  if (!res.ok || data.error) { $("bench-out").innerHTML = `<div class="xray-banner">⚠️ ${escapeHtml(errorText(data))}</div>`; return; }
+  renderBench(data);
+}
+async function viewBenchFile(file) {
+  if (!file) return;
+  let record;
+  try { record = JSON.parse(await file.text()); } catch (e) {
+    $("bench-out").innerHTML = '<div class="xray-banner">⚠️ not a JSON file</div>'; return;
+  }
+  const res = await fetch("/api/bench/view", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(record) });
+  const data = await res.json();
+  if (!res.ok || data.error) { $("bench-out").innerHTML = `<div class="xray-banner">⚠️ ${escapeHtml(errorText(data))}</div>`; return; }
+  renderBench(data);
+}
+function renderBench(b) {
+  const probes = b.probes || [];
+  const cell = (m, pr) => (b.by_model_probe || []).find((r) => r.model === m && r.probe === pr) || {};
+  const head = "<tr><th>model</th><th>status</th><th>passed</th><th>mean</th>" + probes.map((pr) => `<th>${escapeHtml(pr)}</th>`).join("") + "</tr>";
+  const rows = (b.by_model || []).map((m) => {
+    const cells = probes.map((pr) => {
+      const c = cell(m.model, pr);
+      if (c.mean_score === null || c.mean_score === undefined) return `<td class="muted">${c.n_error ? "error" : "—"}</td>`;
+      return `<td><span class="pill ${c.passed ? "pass" : "fail"}">${(+c.mean_score).toFixed(2)}</span></td>`;
+    }).join("");
+    return `<tr><td><b>${escapeHtml(m.model)}</b>${m.synthetic ? ' <span class="badge">synthetic</span>' : ""}</td>`
+      + `<td>${escapeHtml(m.status || "")}</td><td>${m.n_passed} / ${m.n_scored}</td>`
+      + `<td>${m.mean_score === null || m.mean_score === undefined ? "—" : (+m.mean_score).toFixed(2)}</td>${cells}</tr>`;
+  }).join("");
+  $("bench-out").innerHTML = `<div class="note"><b>${escapeHtml(b.title || "benchmark")}</b> · ${escapeHtml(b.created_utc || "")}`
+    + ` · schema ${escapeHtml(String(b.schema || ""))} v${escapeHtml(String(b.schema_version || ""))}</div>`
+    + (b.notes || []).map((n) => `<div class="note">${escapeHtml(n)}</div>`).join("")
+    + `<div style="overflow-x:auto"><table class="ftable">${head}${rows}</table></div>`;
 }
 async function runWhitebox() {
   const prompt = $("prompt-input").value.trim(); if (!prompt) return;
@@ -432,6 +756,7 @@ function switchTab(name) {
   document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === "panel-" + name));
   if (lastPayload) { if (name === "graph") renderGraph(lastPayload); if (name === "heatmap") renderHeatmap(lastPayload); }
+  if (name === "bench") loadBenchList();
 }
 function flash(btn, msg) { const old = btn.textContent; btn.textContent = msg; setTimeout(() => (btn.textContent = old), 1200); }
 function escapeHtml(s) { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
@@ -448,6 +773,16 @@ function init() {
   $("trace-btn").addEventListener("click", runTrace);
   $("whitebox-btn").addEventListener("click", runWhitebox);
   $("xray-btn").addEventListener("click", runXray);
+  $("steer-btn").addEventListener("click", runSteer);
+  $("sae-load-btn").addEventListener("click", loadSae);
+  $("sae-detach-btn").addEventListener("click", detachSae);
+  $("sae-release").addEventListener("change", () => { const o = $("sae-release").selectedOptions[0]; if (o) $("sae-id").placeholder = o.dataset.example || ""; });
+  $("bench-list").addEventListener("change", () => viewBenchByName($("bench-list").value));
+  $("bench-file").addEventListener("change", () => viewBenchFile($("bench-file").files[0]));
+  ["attr-method", "attr-metric", "attr-scoring", "attr-validate", "attr-nodes"].forEach((id) => $(id).addEventListener("change", saveTraceOptions));
+  restoreTraceOptions();
+  loadSaeState();
+  loadBenchList();
   updateXrayHint();
   $("feature-search").addEventListener("input", () => lastPayload && renderFeatures(lastPayload));
   $("copy-proxy").addEventListener("click", () => navigator.clipboard.writeText(`${location.origin}/v1`).then(() => flash($("copy-proxy"), "copied ✓")));

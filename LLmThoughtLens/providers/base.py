@@ -36,8 +36,11 @@ class ProviderOutput:
         Integer ids parallel to ``tokens`` (empty for backends that don't
         expose ids).
     activations:
-        Real hidden-state tensor ``(n_layers, n_tokens, d_model)``.
-        ``None`` for black-box providers.
+        Real residual-stream tensor ``(n_layers, n_tokens, d_model)``:
+        ``activations[l]`` is the output of block ``l`` (``resid_post``).  For
+        HuggingFace models this is the *true* residual — the final norm is not
+        applied, not even on the last layer (see
+        :mod:`LLmThoughtLens.models.hooked`).  ``None`` for black-box providers.
     attentions:
         Real attention tensor ``(n_layers, n_heads, n_tokens, n_tokens)``.
         ``None`` for black-box providers.
@@ -55,6 +58,10 @@ class ProviderOutput:
     meta:
         Provider-specific metadata: model id, latency_ms, usage tokens,
         api_cost_usd, evidence_note, etc.
+    embeddings:
+        Optional embedding output ``(n_tokens, d_model)`` entering the first
+        block (``resid_pre[0]``).  Only set by backends that observe it
+        directly (HuggingFace); ``None`` otherwise — never synthesised.
     """
 
     prompt: str
@@ -66,6 +73,7 @@ class ProviderOutput:
     top_tokens: list[tuple[str, float]] = field(default_factory=list)
     evidence_kind: EvidenceKind = "black_box"
     meta: dict[str, Any] = field(default_factory=dict)
+    embeddings: np.ndarray | None = None
 
     # ------------------------------------------------------------------
     # Convenience accessors
@@ -120,9 +128,13 @@ class BaseProvider(abc.ABC):
     """Abstract base for every LLmThoughtLens backend.
 
     Subclasses MUST implement :meth:`run` and set :attr:`evidence_kind`.
+
+    :attr:`supports_gradients` is ``True`` only for backends whose model can
+    be differentiated in-process (HuggingFace, via ``provider.hooked``).
     """
 
     evidence_kind: EvidenceKind = "black_box"
+    supports_gradients: bool = False
 
     @abc.abstractmethod
     def run(self, prompt: str, **kwargs: Any) -> ProviderOutput:
@@ -154,7 +166,7 @@ class BaseProvider(abc.ABC):
         """Run *prompt* with optional mid-forward feature interventions.
 
         Default implementation ignores interventions; the HuggingFace
-        provider overrides this with real torch forward-pre hooks.
+        provider overrides this with real torch hooks.
         """
         return self.run(prompt, **kwargs)
 

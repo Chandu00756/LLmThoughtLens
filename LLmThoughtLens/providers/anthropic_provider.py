@@ -13,6 +13,7 @@ import time
 from typing import Any
 
 from LLmThoughtLens.providers.base import BaseProvider, ProviderOutput
+from LLmThoughtLens.providers.defaults import resolve_model
 from LLmThoughtLens.utils.tokenizer_utils import whitespace_tokens
 
 
@@ -23,10 +24,11 @@ class AnthropicProvider(BaseProvider):
 
     def __init__(
         self,
-        model: str = "claude-3-5-haiku-20241022",
+        model: str | None = None,
         api_key: str | None = None,
         max_tokens: int = 256,
         timeout: float = 60.0,
+        base_url: str | None = None,
     ) -> None:
         try:
             from anthropic import Anthropic  # noqa: F401
@@ -36,8 +38,9 @@ class AnthropicProvider(BaseProvider):
                 "Install with: pip install 'LLmThoughtLens[anthropic]'"
             ) from exc
 
-        self.model = model
+        self.model = resolve_model("anthropic", model)
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        self._base_url = base_url or None
         self.max_tokens = int(max_tokens)
         self.timeout = float(timeout)
         self._client: Any = None
@@ -54,7 +57,11 @@ class AnthropicProvider(BaseProvider):
         if self._client is None:
             from anthropic import Anthropic
 
-            self._client = Anthropic(api_key=self._api_key, timeout=self.timeout)
+            # ``api_key=None`` lets the SDK resolve credentials itself
+            # (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, or an `ant` profile).
+            self._client = Anthropic(
+                api_key=self._api_key, base_url=self._base_url, timeout=self.timeout
+            )
         return self._client
 
     def run(self, prompt: str, **kwargs: Any) -> ProviderOutput:
@@ -89,6 +96,15 @@ class AnthropicProvider(BaseProvider):
                 "input_tokens": getattr(usage, "input_tokens", None),
                 "output_tokens": getattr(usage, "output_tokens", None),
             }
+        if meta["stop_reason"] == "refusal":
+            # Safety classifiers declined (HTTP 200).  Any text is partial or
+            # empty, so say so rather than presenting it as a real answer.
+            details = getattr(resp, "stop_details", None)
+            meta["refusal"] = {
+                "category": getattr(details, "category", None),
+                "explanation": getattr(details, "explanation", None),
+            }
+            meta["evidence_note"] += " The model declined this request (stop_reason='refusal')."
 
         return ProviderOutput(
             prompt=prompt,

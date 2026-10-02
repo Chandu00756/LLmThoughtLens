@@ -59,6 +59,62 @@
       </div>
 
       <div class="card">
+        <h3>Attribution</h3>
+        <label class="field" for="attr-method">Edge method</label>
+        <select id="attr-method">
+          <option value="auto">auto (gradient on HuggingFace)</option>
+          <option value="gradient">gradient (causal, linearised)</option>
+          <option value="activation_flow">activation flow (correlational)</option>
+        </select>
+        <div class="row">
+          <div>
+            <label class="field" for="attr-metric">Target metric</label>
+            <select id="attr-metric">
+              <option value="logprob">logprob</option>
+              <option value="logit">logit</option>
+              <option value="logit_diff">logit diff</option>
+            </select>
+          </div>
+          <div>
+            <label class="field" for="attr-scoring">Feature scoring</label>
+            <select id="attr-scoring">
+              <option value="centered">centered</option>
+              <option value="l2">raw L2 (legacy)</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label class="field" for="attr-validate">Validate (k ablations)</label>
+            <input type="number" id="attr-validate" value="0" min="0" max="50" />
+          </div>
+          <div>
+            <label class="field" for="attr-nodes">Attribution nodes</label>
+            <input type="number" id="attr-nodes" value="10" min="0" max="100" />
+          </div>
+        </div>
+        <p class="note">Gradient edges are linearised estimates of each node's effect; <b>validate</b>
+          ablates the top-k nodes for real and reports Spearman, Pearson, n and sign agreement.
+          API models always use input masking.</p>
+      </div>
+
+      <div class="card" id="sae-card">
+        <h3>SAE features (HuggingFace)</h3>
+        <label class="field" for="sae-release">Release</label>
+        <select id="sae-release"></select>
+        <label class="field" for="sae-id">SAE id</label>
+        <input type="text" id="sae-id" placeholder="blocks.6.hook_resid_pre" />
+        <label class="note" style="display:flex;gap:6px;align-items:center;margin-top:8px">
+          <input type="checkbox" id="sae-download" style="width:auto" /> allow download (large files)
+        </label>
+        <div class="row" style="margin-top:10px">
+          <button class="btn secondary" id="sae-load-btn">Load &amp; attach</button>
+          <button class="btn secondary" id="sae-detach-btn">Detach</button>
+        </div>
+        <div class="note" id="sae-status">No SAE attached — traces use residual-site features.</div>
+      </div>
+
+      <div class="card">
         <h3>Middle-layer proxy</h3>
         <p class="note">
           Point any app's OpenAI base URL at
@@ -95,6 +151,8 @@
           <div class="tab" data-tab="stream">Residual Stream</div>
           <div class="tab" data-tab="features">Feature Browser</div>
           <div class="tab" data-tab="probes">Probes</div>
+          <div class="tab" data-tab="steering">Steering</div>
+          <div class="tab" data-tab="bench">Benchmarks</div>
           <div class="tab" data-tab="proxy">Live Proxy</div>
         </div>
 
@@ -118,7 +176,7 @@
           <div class="tok-stream" id="xray-tokens"></div>
         </div>
         <div class="panel" id="panel-heatmap"><div id="heatmap-plot"></div><div id="heatmap-empty" class="center-empty">Run a trace to see per-token activation.</div></div>
-        <div class="panel" id="panel-graph"><div id="graph-plot"></div><div id="graph-empty" class="center-empty">Run a trace to see the attribution graph.</div></div>
+        <div class="panel" id="panel-graph"><div id="graph-attr" class="attr-box" style="display:none"></div><div id="graph-plot"></div><div id="graph-empty" class="center-empty">Run a trace to see the attribution graph.</div></div>
         <div class="panel" id="panel-stream">
           <div id="stream-plot"></div>
           <div class="tok-stream" id="tok-stream"></div>
@@ -130,6 +188,41 @@
           <div id="features-empty" class="center-empty">Run a trace to browse features.</div>
         </div>
         <div class="panel" id="panel-probes"><div id="probes-list"></div><div id="probes-empty" class="center-empty">Enable “run probes” on a trace, or use the benchmark CLI.</div></div>
+        <div class="panel" id="panel-steering">
+          <p class="note">Activation steering adds a direction to a <b>local HuggingFace</b> model's residual stream
+            and compares the steered completion with the baseline. The direction is the mean activation
+            difference between the positive and negative prompts (one per line) at the chosen layer.
+            API models expose no residual stream; the mock provider's activations are synthetic.</p>
+          <div class="steer-form">
+            <div><label class="field" for="steer-pos">Positive prompts</label>
+              <textarea id="steer-pos" rows="3">Love
+I am so happy</textarea></div>
+            <div><label class="field" for="steer-neg">Negative prompts</label>
+              <textarea id="steer-neg" rows="3">Hate
+I am so sad</textarea></div>
+          </div>
+          <div class="steer-form steer-form-4">
+            <div><label class="field" for="steer-layer">Layer</label><input type="number" id="steer-layer" value="6" min="0" /></div>
+            <div><label class="field" for="steer-coeff">Coefficient</label><input type="number" id="steer-coeff" value="4" step="0.5" /></div>
+            <div><label class="field" for="steer-site">Site</label>
+              <select id="steer-site"><option value="resid_post">resid_post</option><option value="resid_pre">resid_pre</option></select></div>
+            <div><label class="field" for="steer-positions">Positions</label>
+              <select id="steer-positions"><option value="all">all</option><option value="generated">generated</option><option value="prompt">prompt</option><option value="last">last</option></select></div>
+            <div><label class="field" for="steer-tokens">New tokens</label><input type="number" id="steer-tokens" value="20" min="1" max="256" /></div>
+          </div>
+          <button class="btn" id="steer-btn" style="margin-top:10px">Run steering on the prompt above</button>
+          <div id="steer-out"><div class="center-empty">Pick a HuggingFace provider (e.g. gpt2), then run steering.</div></div>
+        </div>
+        <div class="panel" id="panel-bench">
+          <p class="note">Benchmark records written by <code>LLmThoughtLens benchmark --models … --out-dir …</code>.
+            Records in the config home's <code>bench/</code> folder are listed here, or open any record file.
+            Mock results are synthetic and never model findings.</p>
+          <div class="row" style="align-items:center;margin:8px 0">
+            <select id="bench-list"><option value="">— records in the bench folder —</option></select>
+            <input type="file" id="bench-file" accept=".json,application/json" />
+          </div>
+          <div id="bench-out"><div class="center-empty">No benchmark record loaded.</div></div>
+        </div>
         <div class="panel" id="panel-proxy">
           <p class="note">Live API traffic routed through the ThoughtLens proxy. Real prompts, real completions, real next-token distributions.</p>
           <div class="eventlog" id="proxy-log"><div class="center-empty">No proxied requests yet.</div></div>
